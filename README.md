@@ -33,10 +33,14 @@ MCP는 이 에이전트들이 안정적으로 작동하고 서로 통신할 수 
 
 ## 기본 모델 (Web & REST API & Ajax 아키텍처)
 
-[기본 모델](https://github.com/sayouzone/stock-analysis/base)
+[기본 모델](https://github.com/sayouzone/stock-analysis/tree/main/base)
 
 ## Agent 모델 (ADK & MCP 아키텍처)
 
-## Multi Agents 모델 (Agentic AI (A2A, ADK & MCP) 아키텍처)
+[Agent 모델](https://github.com/sayouzone/stock-analysis/tree/main/adk_mcp)
+
+## Multi-Agents 모델 (Agentic AI (A2A, ADK & MCP) 아키텍처)
+
+[Multi-Agents 모델](https://github.com/sayouzone/stock-analysis/tree/main/multi-agents)
 
 ##
