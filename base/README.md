@@ -5,6 +5,8 @@
 LLM(Large Language Model)으로 뉴스 기사, 댓글 등을 요약하거나 분석합니다. 
 추출된 데이터는 Big Lake(BigQuery)에 저장되어 나중에 분석 및 조회를 위해 사용됩니다.
 
+FastAPI로 제작한 웹페이지 기록
+
 ## 설정
 
 ## 배포
