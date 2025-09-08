@@ -31,8 +31,12 @@ MCP는 이 에이전트들이 안정적으로 작동하고 서로 통신할 수 
 - [주식 투자에 대한 서비스 구축](https://www.sayouzone.com/blog/stocks_investment_service_development)
 - [LLM을 활용하여 주식 시장 분석](https://www.sayouzone.com/blog/stocks_overview)
 
-## 기본 모델
+## 기본 모델 (Web & REST API & Ajax 아키텍처)
 
-##
+[기본 모델](https://github.com/sayouzone/stock-analysis/base)
+
+## Agent 모델 (ADK & MCP 아키텍처)
+
+## Multi Agents 모델 (Agentic AI (A2A, ADK & MCP) 아키텍처)
 
 ##
