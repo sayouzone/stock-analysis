@@ -1,10 +1,32 @@
 # LLM을 활용하여 Stock Market 분석
 
+주식 투자에 대해 정보 수집 및 분석하는 서비스를 구축하는 방법에 대해 알아보겠습니다. FastAPI, yfinance, 웹 크롤링, LLM 분석, MCP 서버 구축 및 Agentic AI 아키텍처를 활용한 종합적인 접근 방식을 다룹니다. LLM은 기본적으로 Gemini Pro 2.5를 사용하며 상황에 따라 GPT-5를 활용하고 있습니다. 추후 Claude 및 Llama 4.0, Mistral, DeepSeek도 활용할 예정입니다.
+
+**Web & REST API & Ajax 아키텍처**
+
+웹 크롤러(Web Crawler)가 주기적으로 목표 웹사이트(Target Website)를 방문하여 HTML 정보를 가져옵니다.<br>
+파서(Parser)는 이 HTML에서 필요한 데이터(뉴스 기사, 댓글 등)만 추출합니다.<br>
+LLM(Large Language Model)으로 뉴스 기사, 댓글 등을 요약하거나 분석합니다.
+
 ![기본 구조](https://www.sayouzone.com/resource/images/blog/stock_analysis_basis.png)
+
+**ADK & MCP 아키텍처**
+
+개발자는 ADK를 사용하여 특정 기능(예: 뉴스 분석, 주가 예측)을 수행하는 개별 에이전트(Agent)들을 개발합니다.<br>
+개발된 에이전트들은 MCP 플랫폼에 배포되어 관리됩니다.<br>
+MCP는 이 에이전트들이 안정적으로 작동하고 서로 통신할 수 있는 환경을 제공합니다.
 
 ![ADK & MCP](https://www.sayouzone.com/resource/images/blog/stock_analysis_agents.png)
 
+**Agentic AI (A2A, ADK & MCP) 아키텍처**
+
+이 프로젝트의 핵심은 Agentic AI 아키텍처에 있습니다. 이는 복잡한 작업을 자율적으로 수행하는 여러 AI 에이전트들의 협력 시스템을 의미합니다.<br>
+예를 들어, '시장 뉴스 분석 에이전트'는 매일 새로운 뉴스를 크롤링하고, LLM을 이용해 "이 뉴스가 A 기업에 긍정적인가, 부정적인가?"를 판단하여 그 결과를 '투자 전략 에이전트'에게 전달합니다.<br>
+'투자 전략 에이전트'는 이 정보를 종합하여 최종 투자 의견을 생성합니다.
+
 ![Agentic AI](https://www.sayouzone.com/resource/images/blog/stock_analysis_agentic_ai.png)
+
+**참조**
 
 - [주식 투자에 대한 서비스 구축](https://www.sayouzone.com/blog/stocks_investment_service_development)
 - [LLM을 활용하여 주식 시장 분석](https://www.sayouzone.com/blog/stocks_overview)
