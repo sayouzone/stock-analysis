@@ -55,3 +55,12 @@ Waiting for build to complete. Polling interval: 1 second(s).
 BUILD FAILURE: Build step failure: build step 2 "gcr.io/google.com/cloudsdktool/cloud-sdk" failed: step exited with non-zero status: 1
 ERROR: (gcloud.builds.submit) build b090611e-b17d-45e1-85ba-8be8f628ad9f completed with status "FAILURE"
 ```
+
+```
+  File "/app/main.py", line 4, in <module>
+    from routers import news, market, fundamentals
+  File "/app/routers/market.py", line 26, in <module>
+    "yahoo": yahoofinance.Market(),
+             ^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'utils.yahoofinance' has no attribute 'Market'
+```

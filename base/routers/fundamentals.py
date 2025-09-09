@@ -8,7 +8,7 @@ from utils.companydict import companydict as find
 # --- 서비스 매핑 ---
 SERVICE_MAP = {
     "naverfinance": naverfinance.NaverCrawler(),
-    "yahoofinance": yahoofinance.YahooCrawler(),
+    "yahoofinance": yahoofinance.Fundamentals(), # Changed from YahooCrawler to Fundamentals
     "opendart": opendart.OpenDartCrawler(), 
 }
 

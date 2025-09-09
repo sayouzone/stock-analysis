@@ -7,7 +7,7 @@ import asyncio
 
 SERVICE_MAP = {
     "naverfinance": naverfinance.News(),
-    "yahoofinance": yahoofinance.News(),
+    "yahoofinance": yahoofinance.YahooCrawler(),
 }
 
 router = APIRouter(prefix="/news")
