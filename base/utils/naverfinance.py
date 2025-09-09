@@ -367,4 +367,3 @@ class Market:
 
 class Fundamentals:
     pass
-    

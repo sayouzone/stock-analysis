@@ -16,3 +16,4 @@ httpx
 lxml
 html5lib
 yfinance
+OpenDartReader
