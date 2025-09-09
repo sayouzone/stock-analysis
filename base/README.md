@@ -5,17 +5,27 @@
 LLM(Large Language Model)으로 뉴스 기사, 댓글 등을 요약하거나 분석합니다. 
 추출된 데이터는 Big Lake(BigQuery)에 저장되어 나중에 분석 및 조회를 위해 사용됩니다.
 
-FastAPI로 제작한 웹페이지 기록
+![기본 구조](https://www.sayouzone.com/resource/images/blog/stock_analysis_basis.png)
 
 ## 설정
-sayouzone.main-homepage/header.html, footer.html 복사 후 .tsx 파일로 변환.
-utils/yahoofinance.py 문제되는 로직 수정.
+
+
 
 ## 배포
-'''gcloud builds submit --config cloudbuild.yaml .```
+
+```bash
+gcloud builds submit --config cloudbuild.yaml .
+```
+
+## 진행사항
+
+sayouzone.main-homepage/header.html, footer.html 복사 후 .tsx 파일로 변환. <br>
+utils/yahoofinance.py 문제되는 로직 수정.
+
 ## 테스트
 
 ## 오류
+
 ```
 Creating temporary archive of 98 file(s) totalling 714.2 KiB before compression.
 Uploading tarball of [.] to [gs://sayouzone-ai_cloudbuild/source/1757400375.553051-5376b0edd3d440f58a4b319a853d44d1.tgz]
