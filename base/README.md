@@ -36,3 +36,22 @@ ERROR: (gcloud.run.deploy) Revision 'stocks-analysis-00044-t8k' is not ready and
 Logs URL: https://console.cloud.google.com/logs/viewer?project=sayouzone-ai&resource=cloud_run_revision/service_name/stocks-analysis/revision_name/stocks-analysis-00044-t8k&advancedFilter=resource.type%3D%22cloud_run_revision%22%0Aresource.labels.service_name%3D%22stocks-analysis%22%0Aresource.labels.revision_name%3D%22stocks-analysis-00044-t8k%22 
 For more troubleshooting guidance, see https://cloud.google.com/run/docs/troubleshooting#container-failed-to-start
 ```
+
+case2
+
+```
+ERROR: (gcloud.builds.submit) build c2d0eb21-d7e9-45cb-9808-e543c5120109 completed with status "FAILURE"
+(base) kimchan-woo@gimchan-uui-MacBookPro base % gcloud builds submit --config cloudbuild.yaml .
+Creating temporary archive of 98 file(s) totalling 716.0 KiB before compression.
+Uploading tarball of [.] to [gs://sayouzone-ai_cloudbuild/source/1757401246.438867-61fa5b587f234c5c926b59f037043282.tgz]
+Created [https://cloudbuild.googleapis.com/v1/projects/sayouzone-ai/locations/global/builds/b090611e-b17d-45e1-85ba-8be8f628ad9f].
+Logs are available at [ https://console.cloud.google.com/cloud-build/builds/b090611e-b17d-45e1-85ba-8be8f628ad9f?project=1037372895180 ].
+
+gcloud builds submit only displays logs from Cloud Storage. To view logs from Cloud Logging, run:
+gcloud beta builds submit
+
+Waiting for build to complete. Polling interval: 1 second(s).
+
+BUILD FAILURE: Build step failure: build step 2 "gcr.io/google.com/cloudsdktool/cloud-sdk" failed: step exited with non-zero status: 1
+ERROR: (gcloud.builds.submit) build b090611e-b17d-45e1-85ba-8be8f628ad9f completed with status "FAILURE"
+```
