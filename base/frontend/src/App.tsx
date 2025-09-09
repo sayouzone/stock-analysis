@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Header } from "./components/Header";
+import { Footer } from "./components/Footer";
 import { Sidebar } from "./components/Sidebar";
 import { MarketAnalysis } from "./components/MarketAnalysis";
 import { NewsAnalysis } from "./components/NewsAnalysis";
@@ -44,12 +45,13 @@ export default function App() {
       <div className="flex flex-col flex-grow">
         <Header />
         <div className="flex flex-grow bg-background">
-          <Sidebar 
-            selectedFeature={selectedFeature} 
-            onFeatureChange={setSelectedFeature} 
+          <Sidebar
+            selectedFeature={selectedFeature}
+            onFeatureChange={setSelectedFeature}
           />
           {renderMainContent()}
         </div>
+        <Footer />
       </div>
     </div>
   );

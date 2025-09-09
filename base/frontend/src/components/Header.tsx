@@ -17,16 +17,16 @@ export function Header() {
             <path fill="rgb(233,66,201)" stroke="rgb(233,66,201)" strokeWidth="1" opacity="0.7607843137254902" d="M 14.5 29 L 13.5 31 L 14.5 29 Z " />
           </svg>
         </div>
-        <h2 className="text-[#111518] text-lg font-bold leading-tight tracking-[-0.015em]">사유존</h2>
+        <h2 className="text-[#111518] text-lg font-bold leading-tight tracking-[-0.015em]"><a href="https://www.sayouzone.com">사유존</a></h2>
       </div>
       <div className="flex flex-1 justify-end gap-8">
         <div className="flex items-center gap-9">
-          <a className="text-[#111518] text-sm font-medium leading-normal" href="#">소개</a>
-          <a className="text-[#111518] text-sm font-medium leading-normal" href="#">서비스</a>
-          <a className="text-[#111518] text-sm font-medium leading-normal" href="#">성공 사례</a>
-          <a className="text-[#111518] text-sm font-medium leading-normal" href="#">팀</a>
+          <a className="text-[#111518] text-sm font-medium leading-normal" href="https://www.sayouzone.com/about">소개</a>
+          <a className="text-[#111518] text-sm font-medium leading-normal" href="https://stocks.sayouzone.com">서비스</a>
+          <a className="text-[#111518] text-sm font-medium leading-normal" href="#">적용 사례</a>
           <a className="text-[#111518] text-sm font-medium leading-normal" href="#">자원</a>
-          <a className="text-[#111518] text-sm font-medium leading-normal" href="#">문의</a>
+          <a className="text-[#111518] text-sm font-medium leading-normal" href="https://www.sayouzone.com/blog">블로그</a>
+          <a className="text-[#111518] text-sm font-medium leading-normal" href="https://www.sayouzone.com/contact">문의</a>
         </div>
         <button className="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded h-10 px-4 bg-[#1994e6] text-white text-sm font-bold leading-normal tracking-[0.015em]">
           <span className="truncate">시작하기</span>

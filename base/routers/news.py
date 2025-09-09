@@ -31,9 +31,7 @@ async def news_collect_or_process(function: str, site: str, stock: str, period: 
 
         service_module = SERVICE_MAP.get(site.lower())
         if not service_module:
-            yield f"data: {json.dumps({'error': f'Site {site} not found.'})}
-
-"
+            yield f"data: {json.dumps({'error': f'Site {site} not found.'})}\n\n"
             return
 
         handler = getattr(service_module, f"news_{fn}", None)
@@ -45,46 +43,33 @@ async def news_collect_or_process(function: str, site: str, stock: str, period: 
         try:
             if fn == 'collect':
                 async for event in handler(query=stock, max_articles=max_articles, period=period): # type: ignore
-                    yield f"data: {json.dumps(event)}
-
-"
+                    yield f"data: {json.dumps(event)}\n\n"
                     await asyncio.sleep(0.01)
             else:
                 async for event in handler(query=stock, limit=max_articles, period=period): # type: ignore
                     if event.get("type") == "result":
                         articles = event["data"]
                     elif event.get("type") == "error":
-                        yield f"data: {json.dumps(event)}
-
-"
+                        yield f"data: {json.dumps(event)}\n\n"
                         return
                     else:
-                        yield f"data: {json.dumps(event)}
-
-"
+                        yield f"data: {json.dumps(event)}\n\n"
                     await asyncio.sleep(0.01)
 
                 if not articles:
                     final_payload = {"type": "final", "result": [], "analysis": {"summary": "분석할 뉴스가 없습니다."}}
-                    yield f"data: {json.dumps(final_payload)}
-
-"
+                    yield f"data: {json.dumps(final_payload)}\n\n"
                     return
 
                 # AI 분석
-                yield f"data: {json.dumps({'type': 'progress', 'step': 'analysis', 'status': 'start'})}
+                yield f"data: {json.dumps({'type': 'progress', 'step': 'analysis', 'status': 'start'})}\n\n"
 
-"
                 analysis_input = json.dumps(articles, ensure_ascii=False, indent=2)
                 prompt = get_news_prompt()
                 analysis_result_str = gemini.analysis(data_json=analysis_input, prompt=prompt)
                 final_payload = {"type": "final", "result": articles, "analysis": analysis_result_str}
-                yield f"data: {json.dumps(final_payload)}
+                yield f"data: {json.dumps(final_payload)}\n\n"
 
-"
         except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}
-
-"
-
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
     return StreamingResponse(event_stream(), media_type="text/event-stream")
