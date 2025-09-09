@@ -9,7 +9,12 @@ LLM(Large Language Model)으로 뉴스 기사, 댓글 등을 요약하거나 분
 
 ## 설정
 
+cloudbuild.yaml 파일
 
+- 1단계: 풀스택 애플리케이션 Docker 이미지 빌드 (FastAPI + React)
+- 2단계: 빌드된 이미지를 Artifact Registry에 푸시
+- 3단계: Cloud Run 서비스 배포
+- 4단계: 배포된 서비스 정보 출력
 
 ## 배포
 
