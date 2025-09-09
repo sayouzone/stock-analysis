@@ -29,7 +29,7 @@ utils/yahoofinance.py 문제되는 로직 수정.
 
 ## 테스트
 
-![대시보드](https://www.sayouzone.com/resource/images/blog/financial_analysis_dashboad.png)
+![대시보드](https://www.sayouzone.com/resource/images/blog/financial_analysis_dashboard.png)
 
 ## 오류
 
