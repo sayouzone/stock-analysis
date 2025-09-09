@@ -365,4 +365,6 @@ class Market:
 
         return result
 
+class Fundamentals:
+    pass
     
