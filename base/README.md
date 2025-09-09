@@ -9,6 +9,7 @@ FastAPI로 제작한 웹페이지 기록
 
 ## 설정
 sayouzone.main-homepage/header.html, footer.html 복사 후 .tsx 파일로 변환.
+utils/yahoofinance.py 문제되는 로직 수정.
 
 ## 배포
 '''gcloud builds submit --config cloudbuild.yaml .```
