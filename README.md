@@ -42,5 +42,5 @@ MCP는 이 에이전트들이 안정적으로 작동하고 서로 통신할 수 
 
 ## 참고
 
-- [주식 투자에 대한 서비스 구축](https://www.sayouzone.com/blog/stocks_investment_service_development)
-- [LLM을 활용하여 주식 시장 분석](https://www.sayouzone.com/blog/stocks_overview)
+- [주식 투자에 대한 서비스 구축](https://www.sayouzone.com/blog/item/stocks_investment_service_development)
+- [LLM을 활용하여 주식 시장 분석](https://www.sayouzone.com/blog/item/stocks_overview)
