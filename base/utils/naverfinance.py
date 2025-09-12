@@ -1,10 +1,11 @@
 import json
+import requests  # type: ignore
 import asyncio
-from bs4 import BeautifulSoup
-import httpx
+from bs4 import BeautifulSoup # type: ignore
+import httpx # type: ignore
 import re
 import random
-import pandas as pd
+import pandas as pd # type: ignore
 from datetime import datetime, timedelta
 from io import StringIO
 from urllib import parse
@@ -364,6 +365,3 @@ class Market:
                 item['date'] = item['date'].strftime('%Y-%m-%d')
 
         return result
-
-class Fundamentals:
-    pass
