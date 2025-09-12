@@ -1,10 +1,13 @@
 import requests
-import io
-import pandas as pd
 from bs4 import BeautifulSoup
 
-class FnguideCrawler:
-    def fundamentals(company: str):
+import pandas as pd
+
+import io
+class fundamentals:
+
+    @staticmethod
+    def funtamentals_collect(company: str):
         url = 'https://comp.fnguide.com/SVO2/ASP/SVD_main.asp?pGB=1&gicode=A' + company
 
         request = requests.get(url)
