@@ -26,6 +26,7 @@ gcloud builds submit --config cloudbuild.yaml .
 
 sayouzone.main-homepage/header.html, footer.html 복사 후 .tsx 파일로 변환. <br>
 utils/yahoofinance.py 문제되는 로직 수정.
+Google Colab 환경에서 fuguide.py에 쓰일 코드를 테스트함.<br> 각 테이블 마다 적용할 메소드, 함수와 저장 방법을 다르게 해야함.
 
 ## 테스트
 
