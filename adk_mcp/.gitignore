@@ -1,0 +1,55 @@
+# macOS
+.DS_Store
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Tool caches
+.mypy_cache/
+.pytest_cache/
+coverage/
+htmlcov/
+.coverage*
+
+# Logs and databases
+*.log
+*.sqlite3
+*.db
+*.pid
+
+# IDE settings
+.vscode/
+.idea/
+
+# Environment files
+.env
+.env.*
+*.local
+
+# Node / frontend
+node_modules/
+frontend/node_modules/
+frontend/.vite/
+frontend/dist/
+frontend/build/
+
+# Build artifacts
+build/
+dist/
+.tmp/
+tmp/
+
+# Project-specific
+docs_cache/
+
+# Docker
+*.tar

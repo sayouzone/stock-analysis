@@ -1,10 +1,16 @@
 from google import genai
 from google.genai import types
+
 import pandas as pd
 import json
 import os
 
-def analysis(data_json: str, prompt: str):
+tool_config = types.ToolConfig(
+    function_calling_config=types.FunctionCallingConfig(
+        mode="AUTO", allowed_function_names=[""]
+    )
+)
+def analysis(stock : str, prompt: str):
     """
     Analyzes financial data using the Gemini API with a given prompt.
     Returns the raw JSON string from the API.
@@ -15,11 +21,14 @@ def analysis(data_json: str, prompt: str):
             raise ValueError("GEMINI_API_KEY environment variable not set.")
 
         # Configure the model to output JSON
-        generation_config = types.GenerateContentConfig(response_mime_type="application/json")
+        generation_config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            tools=[]
+            )
         
         client = genai.Client(api_key=api_key)
 
-        full_prompt = f"{prompt}\n\n{data_json}"
+        full_prompt = f"{prompt}\n\nUse find_fnguide_data(stock) with {stock} and then analyze"
 
         # Use a model that explicitly supports JSON mode
 

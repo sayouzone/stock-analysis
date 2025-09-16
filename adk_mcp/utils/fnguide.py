@@ -4,7 +4,7 @@ import pandas as pd
 import lxml
 
 import json
-from google.cloud import storage
+from .gcpmanager import GCSManager
 
 import io
 import re
@@ -13,9 +13,7 @@ class Fundamentals:
     def __init__(self, stock : str = '005930'):
         self.stock = stock
         self.url = f'https://comp.fnguide.com/SVO2/ASP/SVD_main.asp?pGB=1&gicode=A{stock}'
-
-        self.storage_client = storage.Client('sayouzone-ai')
-        self.bucket = self.storage_client.bucket('sayouzone-ai-stocks')
+        self.gcs = GCSManager(bucket_name="sayouzone-ai-stocks")
     
     def fundamentals(self, stock : str = None):
         if stock:
@@ -146,20 +144,22 @@ class Fundamentals:
         json_names = ["market_conditions", "earning_issue", "analysis"]
         csv_names = ["holdings_status", "governance", "shareholders", "industry_comparison", "bond_rating", "financialhighlight_annual", "financialhighlight_netquarter"]
 
+        folder_name = f"/FnGuide/{self.stock}/"
+        search = self.gcs.list_files(folder_name=folder_name)
         # JSON 데이터 업로드
         for i, json_data in enumerate(processed_data.get("json", [])):
+            if json_names[i] in search:
+                continue
             if i < len(json_names):
-                file_name = f"{self.stock}/FnGuide/{json_names[i]}.json"
-                blob = self.bucket.blob(file_name)
-                blob.upload_from_string(json_data, content_type='application/json')
-                print(f"Uploaded {file_name} to GCS.")
+                file_name = f"/FnGuide/{self.stock}/{json_names[i]}.json"
+                self.gcs.upload_file(source_file=json_data, destination_blob_name=file_name)
 
         # CSV 데이터(DataFrame/Series) 업로드
         for i, df_data in enumerate(processed_data.get("to_csv", [])):
+            if csv_names[i] in search:
+                continue
             if i < len(csv_names):
-                file_name = f"{self.stock}/FnGuide/{csv_names[i]}.csv"
-                blob = self.bucket.blob(file_name)
+                file_name = f"{folder_name}" + f"{csv_names[i]}.csv"
                 # DataFrame/Series를 CSV 문자열로 변환하여 업로드
                 csv_string = df_data.to_csv()
-                blob.upload_from_string(csv_string, content_type='text/csv')
-                print(f"Uploaded {file_name} to GCS.")
+                self.gcs.upload_file(source_file=csv_string, destination_blob_name=file_name)

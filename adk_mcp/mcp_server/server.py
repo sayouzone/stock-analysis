@@ -5,11 +5,11 @@ mcp = FastMCP(name="StockFundamentalsServer")
 
 @mcp.tool(
     name="find_fnguide_data",
-    description="Fetch stock fundamentals data from FnGuide for a given stock code.",
+    description="Fetch Korean stock fundamentals data from FnGuide for a given Korean stock code.",
     tags={"finance", "stocks", "fundamentals"}
 )
 def fetch_fnguide_data(stock: str):
-    return Fundamentals(stock).get_fundamentals()
+    return Fundamentals(stock).fundamentals()
 
 if __name__ == "__main__":
     mcp.run()

@@ -1,0 +1,46 @@
+# Version control
+.git
+.gitignore
+
+# Python caches
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Local configuration and secrets
+.env
+.env.*
+*.local
+
+# Logs and temp files
+*.log
+*.pid
+tmp/
+.tmp/
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Frontend dependencies and builds
+node_modules/
+frontend/node_modules/
+frontend/.vite/
+frontend/dist/
+frontend/build/
+
+# Build outputs
+build/
+dist/
+docs_cache/
+
+# Docker artifacts
+*.tar

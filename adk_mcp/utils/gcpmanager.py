@@ -6,7 +6,7 @@ import pandas as pd
 class GCSManager:
     def __init__(self, bucket_name="sayouzone-ai-stocks"):
         self.bucket_name = bucket_name
-        self.storage_client = storage.Client()
+        self.storage_client = storage.Client(project='sayonzone-ai')
 
     def list_files(self, folder_name=None, sort_by_time=True):
         print(f"'{folder_name if folder_name else '전체'}' 구역의 파일 목록 조회를 시작합니다...")
