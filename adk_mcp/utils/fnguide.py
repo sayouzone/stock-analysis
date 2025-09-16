@@ -1,6 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
+import lxml
 
 import json
 from google.cloud import storage
@@ -14,17 +15,35 @@ class Fundamentals:
         self.url = f'https://comp.fnguide.com/SVO2/ASP/SVD_main.asp?pGB=1&gicode=A{stock}'
 
         self.storage_client = storage.Client('sayouzone-ai')
-        self.bucket = self.storage_client.bucket('FnGuide')
+        self.bucket = self.storage_client.bucket('sayouzone-ai-stocks')
     
     def get_fundamentals(self):
         request = requests.get(self.url)
 
-        soup = BeautifulSoup(request.text, 'html.parser')
+        soup = BeautifulSoup(request.text, 'lxml')
         tables = soup.find_all('table')
 
-        processing_map = self._df_mapping(tables)
+        processed_data = self._df_mapping(tables)
 
-        return self.load_to_gcs(processing_map)
+        # GCS에 데이터를 업로드합니다.
+        self.upload_to_gcs(processed_data)
+
+        # API가 반환할 수 있도록 데이터를 직렬화 가능한 딕셔너리 형태로 가공합니다.
+        return_data = {}
+        json_names = ["market_conditions", "earning_issue", "analysis"]
+        df_names = ["holdings_status", "governance", "shareholders", "industry_comparison", "bond_rating", "financialhighlight_annual", "financialhighlight_netquarter"]
+
+        for i, json_str in enumerate(processed_data.get("json", [])):
+            return_data[json_names[i]] = json.loads(json_str)
+
+        for i, df in enumerate(processed_data.get("to_csv", [])):
+            if isinstance(df, pd.Series):
+                return_data[df_names[i]] = df.to_dict()
+            else:
+                # DataFrame의 인덱스를 컬럼으로 변환하여 to_dict에 포함
+                return_data[df_names[i]] = df.reset_index().to_dict(orient='records')
+
+        return return_data
     
     def _df_mapping(self, tables):
         market_conditions = (pd.read_html(io.StringIO(str(tables[0])))[0]
@@ -79,18 +98,17 @@ class Fundamentals:
                     .to_json(orient='records', force_ascii=False, indent=4))
 
         holdings_status = (pd.read_html(io.StringIO(str(tables[2])))[0]
-                           .set_index('운용사명', inplace=True))
+                           .set_index('운용사명'))
         
         governance = (pd.read_html(io.StringIO(str(tables[3])))[0]
-                      .dropna(inplace=True)
+                      .dropna()
                       .set_index('항목'))
 
         shareholders = (pd.read_html(io.StringIO(str(tables[4])))[0]
                         .fillna(0)
                         .set_index('주주구분'))
 
-        industry_comparison = (pd.read_html(io.StringIO(str(tables[8])))[0]
-                               .set_index('구분', inplace=True))
+        industry_comparison = pd.read_html(io.StringIO(str(tables[8])))[0].set_index('구분')
         
         # tables[5] (기업어음)은 데이터 부족으로 건너뜀
         # 문자열 파싱
@@ -106,12 +124,12 @@ class Fundamentals:
         financialhighlight_annual = (pd.read_html(io.StringIO(str(tables[11])))[0]
                                      .fillna('없음')
                                      .rename(columns={'IFRS(연결)': 'IFRS'})
-                                     .set_index('IFRS', inplace=True))['Annual']
+                                     .set_index('IFRS'))['Annual']
         
         financialhighlight_netquarter = (pd.read_html(io.StringIO(str(tables[12])))[0]
                                      .fillna('없음')
                                      .rename(columns={'IFRS(연결)': 'IFRS'})
-                                     .set_index('IFRS', inplace=True))['Net Quarter']
+                                     .set_index('IFRS'))['Net Quarter']
         
         return {
             "json" : [market_conditions, earning_issue, analysis],
@@ -119,27 +137,25 @@ class Fundamentals:
         }
         
     
-    def load_to_gcs(self, processing_map: dict):
-        data_dict = {}
-        for key, value in processing_map.items():
-            if key == "json":
-                for json_data in value:
-                    file_name = f"{self.stock}_{json_data}.json"
-                    blob = self.bucket.blob(file_name)
+    def upload_to_gcs(self, processed_data: dict):
+        """처리된 데이터를 GCS에 업로드합니다."""
+        json_names = ["market_conditions", "earning_issue", "analysis"]
+        csv_names = ["holdings_status", "governance", "shareholders", "industry_comparison", "bond_rating", "financialhighlight_annual", "financialhighlight_netquarter"]
 
-                    file_content = blob.download_as_string()
-                    
-                    data_dict[json_data] = file_content.decode('utf-8')
-            elif key == "to_csv":
-                for csv_data in value:
-                    try:
-                        file_name = f"{self.stock}_{csv_data}.csv"
-                        blob = self.bucket.blob(file_name)
-                        file_content = blob.download_as_string()
-                        df = pd.read_csv(io.StringIO(file_content.decode('utf-8')))
-                        data_dict[csv_data] = df
-                    except Exception as e:
-                        print(f"CSV 파일 읽기 오류: {e}")
-                        # 다른 파일 형식이면 content 자체를 반환
-                        data_dict[csv_data] = file_content.decode('utf-8')
-        return data_dict
+        # JSON 데이터 업로드
+        for i, json_data in enumerate(processed_data.get("json", [])):
+            if i < len(json_names):
+                file_name = f"{self.stock}/FnGuide/{json_names[i]}.json"
+                blob = self.bucket.blob(file_name)
+                blob.upload_from_string(json_data, content_type='application/json')
+                print(f"Uploaded {file_name} to GCS.")
+
+        # CSV 데이터(DataFrame/Series) 업로드
+        for i, df_data in enumerate(processed_data.get("to_csv", [])):
+            if i < len(csv_names):
+                file_name = f"{self.stock}/FnGuide/{csv_names[i]}.csv"
+                blob = self.bucket.blob(file_name)
+                # DataFrame/Series를 CSV 문자열로 변환하여 업로드
+                csv_string = df_data.to_csv()
+                blob.upload_from_string(csv_string, content_type='text/csv')
+                print(f"Uploaded {file_name} to GCS.")
