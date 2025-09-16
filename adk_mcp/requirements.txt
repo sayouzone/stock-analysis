@@ -5,6 +5,7 @@ beautifulsoup4
 requests
 google-cloud-storage
 google-cloud-aiplatform
+google-adk
 langchain
 langchain-google-genai
 python-dotenv
