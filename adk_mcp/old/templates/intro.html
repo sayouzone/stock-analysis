@@ -1,0 +1,126 @@
+<!-- index.html -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Financial Analysis</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script> <!-- 이거 한 줄 추가요! -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        #analyze-btn:disabled { background-color: #a5b4fc; cursor: not-allowed; }
+        /* 동적으로 생성될 테이블 스타일 */
+        #dataTable th, #dataTable td {
+            padding: 0.75rem;
+            border: 1px solid #e5e7eb; /* gray-200 */
+            text-align: left;
+            white-space: nowrap;
+        }
+        #dataTable thead {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        #dataTable th {
+            background-color: #f9fafb; /* gray-50 */
+            font-weight: 600;
+        }
+        #dataTable tr:nth-child(even) {
+            background-color: #f9fafb; /* gray-50 */
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div class="relative flex flex-col bg-white group/design-root overflow-x-hidden" style="font-family: &quot;Public Sans&quot;, &quot;Noto Sans&quot;, sans-serif;">
+        <div class="layout-container flex grow flex-col">
+
+          <header class="flex items-center justify-between whitespace-nowrap border-b border-solid border-b-[#f0f3f4] px-10 py-3">
+            <div class="flex items-center gap-0 text-[#111518]">
+              <div class="size-8">
+                <!--<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M44 4H30.6666V17.3334H17.3334V30.6666H4V44H44V4Z" fill="currentColor"></path></svg>-->
+                <svg viewBox="0 0 48 48" fill="none" version="1.1" xmlns="http://www.w3.org/2000/svg" desc="Created with imagetracer.js version 1.2.6"><path fill="rgb(0,0,0)" stroke="rgb(0,0,0)" stroke-width="1" opacity="0" d="M 0 0 L 48 0 L 48 48 L 0 48 L 0 0 Z M 23 3 L 19 5 L 10 14 L 9 21 L 22 29 Q 22 33 20 33 L 19 32 Q 18 28 15 29 Q 12 30 13 34 L 17 36 Q 15 37 16 42 L 20 44 L 27 42 L 36 33 L 37 30 L 36 25 Q 28 23 23 18 L 30 10 L 29 5 Q 28 2 23 3 Z M 29 12 L 27 14 Q 26 18 30 18 L 32 17 Q 34 18 33 14 Q 32 11 29 12 Z "></path><path fill="rgb(42,194,238)" stroke="rgb(42,194,238)" stroke-width="1" opacity="0.8274509803921568" d="M 22.5 3 Q 27.8 1.8 29 4.5 L 30 9.5 L 22 16.5 L 24 13.5 Q 23 11 18.5 12 L 13.5 18 L 10.5 17 L 10 20.5 L 16 24.5 L 14.5 24 L 9 20.5 L 10 13.5 L 18.5 5 L 22.5 3 Z "></path><path fill="rgb(42,194,238)" stroke="rgb(42,194,238)" stroke-width="1" opacity="0.8274509803921568" d="M 18.5 31 L 19 33.5 L 17 34.5 L 18.5 31 Z "></path><path fill="rgb(33,71,218)" stroke="rgb(33,71,218)" stroke-width="1" opacity="0.9568627450980393" d="M 18.5 12 Q 23 11 24 13.5 L 22 16.5 L 25.5 21 L 28 22.5 L 25.5 23 L 19.5 26 L 10 20.5 L 10.5 17 L 13.5 18 L 18.5 12 Z "></path><path fill="rgb(33,71,218)" stroke="rgb(33,71,218)" stroke-width="1" opacity="0.9568627450980393" d="M 14 30 Q 19.6 27.8 18 33.5 L 15.5 35 Q 11.3 33.2 14 31.5 L 14 30 Z "></path><path fill="rgb(147,24,200)" stroke="rgb(147,24,200)" stroke-width="1" opacity="0.9333333333333333" d="M 26.5 22 L 30.5 24 L 36 27.5 L 35.5 30 L 31.5 27 L 27.5 35 L 20.5 40 L 17 40 Q 16 36.2 18.5 35 L 22 32.5 L 23 30.5 L 21.5 27 L 20 26.5 L 26.5 22 Z "></path><path fill="rgb(233,66,201)" stroke="rgb(233,66,201)" stroke-width="1" opacity="0.7607843137254902" d="M 28.5 12 Q 32.3 11.3 33 13.5 Q 34.5 17.9 31.5 17 L 29.5 18 Q 26.5 17.5 27 13.5 L 28.5 12 Z "></path><path fill="rgb(233,66,201)" stroke="rgb(233,66,201)" stroke-width="1" opacity="0.7607843137254902" d="M 29.5 22 L 36 25 L 37 29.5 L 36 32.5 L 26.5 42 L 19.5 44 L 16 41.5 L 16 36.5 L 22.5 30 L 22 31.5 L 19.5 35 L 17 36.5 Q 15.3 41.8 20.5 40 L 29 33.5 L 31.5 27 L 35.5 30 L 36 27.5 L 30.5 24 L 29.5 22 Z "></path><path fill="rgb(233,66,201)" stroke="rgb(233,66,201)" stroke-width="1" opacity="0.7607843137254902" d="M 18.5 25 L 19.5 27 L 18.5 25 Z "></path><path fill="rgb(233,66,201)" stroke="rgb(233,66,201)" stroke-width="1" opacity="0.7607843137254902" d="M 21.5 27 L 22.5 29 L 21.5 27 Z "></path><path fill="rgb(233,66,201)" stroke="rgb(233,66,201)" stroke-width="1" opacity="0.7607843137254902" d="M 14.5 29 L 13.5 31 L 14.5 29 Z "></path></svg>
+              </div>
+              <h2 class="text-[#111518] text-lg font-bold leading-tight tracking-[-0.015em]">사유존</h2>
+            </div>
+            <div class="flex flex-1 justify-end gap-8">
+              <div class="flex items-center gap-9">
+                <a class="text-[#111518] text-sm font-medium leading-normal" href="#">소개</a>
+                <a class="text-[#111518] text-sm font-medium leading-normal" href="#">서비스</a>
+                <a class="text-[#111518] text-sm font-medium leading-normal" href="#">성공 사례</a>
+                <a class="text-[#111518] text-sm font-medium leading-normal" href="#">팀</a>
+                <a class="text-[#111518] text-sm font-medium leading-normal" href="#">자원</a>
+                <a class="text-[#111518] text-sm font-medium leading-normal" href="#">문의</a>
+              </div>
+              <button class="flex min-w-[84px max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded h-10 px-4 bg-[#1994e6] text-white text-sm font-bold leading-normal tracking-[0.015em]">
+                <span class="truncate">시작하기</span>
+              </button>
+            </div>
+          </header>
+        </div>
+       </div>
+    <!-- 전체 레이아웃을 감싸는 div에서 flex 제거 -->
+    <div class="min-h-screen flex items-center justify-center">
+        <main class="w-full p-8">
+            <h1 class="text-3xl font-bold text-center mb-10">Financial Analysis Dashboard</h1>
+                <div class="flex flex-col gap-8">
+                    <div class="bg-white p-8 rounded-lg border shadow-sm">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                            <div>
+                        <label for="analysis-type" class="block mb-2 font-medium">분석 유형</label>
+                        <select id="analysis-type" class="w-full p-2 border rounded-md">
+                            <option value="market">Market</option>
+                            <option value="fundamentals">Fundamentals</option>
+                            <option value="news">News</option>
+                        </select>
+                            </div>
+                        <div>
+                                <label for="site" class="block mb-2 font-medium">사이트</label>
+                                <select id="site" class="w-full p-2 border rounded-md">
+                                    <option value="naverfinance">Naver Finance</option>
+                                    <option value="yahoofinance">Yahoo Finance</option>
+                                    <option value="google">Google</option> <!-- News를 위해 Google 추가 -->
+                                </select>
+                            </div>
+                            <div>
+                                <label for="stock" class="block mb-2 font-medium">종목</label>
+                                <select id="stock" class="w-full p-2 border rounded-md">
+                                    <option>삼성전자</option>
+                                    <option>SK하이닉스</option>
+                                    <option>Apple Inc.</option>
+                                    <option>NVIDIA</option>
+                        </select>
+                        </div>
+                            <div>
+                                <label for="gen-ai" class="block mb-2 font-medium">GenAI</label>
+                                <select id="gen-ai" class="w-full p-2 border rounded-md">
+                                    <option>Gemini 2.5 Pro</option>
+                                    <option>GPT-4o</option>
+                                </select>
+                    </div>
+                            <div class="sm:col-span-2">
+                                <div class="max-w-xs mx-auto">
+                                <button id="analyze-btn" class="w-full bg-indigo-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-indigo-700 shadow-md">
+                                    분석
+                                </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-8 rounded-lg border w-full shadow-sm">
+                        <h3 class="text-xl font-semibold mb-4">결과</h3>
+                        <div id="result-area" class="prose max-w-none w-full min-h-64 border-gray-200 border rounded-md p-4 overflow-y-auto">
+                            <p class="text-gray-400">요약 결과가 여기에 표시됩니다...</p>
+                        </div>
+                        <div id="table-container" class="mt-6"></div>
+                    </div>
+            </div>
+        </main>
+    </div>
+    <!-- JavaScript 파일을 여기에 연결합니다. -->
+    <script src="/static/js/script.js"></script>
+</body>
+</html>
+```

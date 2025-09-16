@@ -10,14 +10,18 @@ import io
 import re
 
 class Fundamentals:
-    def __init__(self, stock):
+    def __init__(self, stock : str = '005930'):
         self.stock = stock
         self.url = f'https://comp.fnguide.com/SVO2/ASP/SVD_main.asp?pGB=1&gicode=A{stock}'
 
         self.storage_client = storage.Client('sayouzone-ai')
         self.bucket = self.storage_client.bucket('sayouzone-ai-stocks')
     
-    def get_fundamentals(self):
+    def fundamentals(self, stock : str = None):
+        if stock:
+            self.stock = stock
+            self.url = f'https://comp.fnguide.com/SVO2/ASP/SVD_main.asp?pGB=1&gicode=A{stock}'
+
         request = requests.get(self.url)
 
         soup = BeautifulSoup(request.text, 'lxml')

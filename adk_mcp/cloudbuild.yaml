@@ -1,0 +1,72 @@
+# Google Cloud Build 구성 파일 (cloudbuild.yaml)
+# 이 파일은 소스 코드를 빌드, 테스트 및 배포하는 단계를 정의합니다.
+
+steps:
+  # 1단계: 풀스택 애플리케이션 Docker 이미지 빌드 (FastAPI + React)
+  - name: "gcr.io/cloud-builders/docker"
+    id: "Build"
+    args:
+      - "build"
+      - "--build-arg"
+      - "VITE_API_URL=${_SERVICE_URL}"
+      - "--build-arg"
+      - "FRONTEND_URL=${_SERVICE_URL}"
+      # 이미지 태그를 'latest'로 고정합니다.
+      - "-t"
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_IMAGE_NAME}:latest"
+      - "."
+
+  # 2단계: 빌드된 이미지를 Artifact Registry에 푸시
+  - name: "gcr.io/cloud-builders/docker"
+    id: "Push"
+    args:
+      [
+        "push",
+        # 'latest' 태그가 지정된 이미지를 푸시합니다.
+        "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_IMAGE_NAME}:latest",
+      ]
+    wait_for: ["Build"]
+
+  # 3단계: Cloud Run 서비스 배포
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: "Deploy"
+    entrypoint: "gcloud"
+    args:
+      - "run"
+      - "deploy"
+      - "${_SERVICE_NAME}"
+      - "--image"
+      # 'latest' 태그가 지정된 이미지로 배포합니다.
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_IMAGE_NAME}:latest"
+      - "--region=${_REGION}"
+      - "--platform=managed"
+      - "--allow-unauthenticated"
+      - "--set-secrets=GEMINI_API_KEY=gemini-api-key:latest"
+    wait_for: ["Push"]
+
+  # 4단계: 배포된 서비스 정보 출력
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: "gcloud"
+    args:
+      - "run"
+      - "services"
+      - "describe"
+      - "${_SERVICE_NAME}"
+      - "--platform=managed"
+      - "--region=${_REGION}"
+      - "--format=yaml"
+    wait_for: ["Deploy"]
+
+images:
+  # 빌드에서 생성되는 최종 이미지입니다.
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_IMAGE_NAME}:latest"
+
+substitutions:
+  _REGION: "us-central1"
+  _REPO_NAME: "stocks-analysis"
+  _IMAGE_NAME: "stocks-analysis-base"
+  _SERVICE_NAME: "stocks-analysis"
+  _SERVICE_URL: "http://localhost:3000"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
