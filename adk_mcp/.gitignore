@@ -60,4 +60,4 @@ Dockerfile
 
 # Ignore compiled files
 cloudbuild.yaml
-
+.gcloudignore
