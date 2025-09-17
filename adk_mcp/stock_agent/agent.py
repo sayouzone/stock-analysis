@@ -57,6 +57,36 @@ class AnalysisResult(BaseModel):
     management_capability : str = Field(description="Evaluation of the company's management capability.")
     industry_macro_environment : str = Field(description="Overview of the industry and macroeconomic environment.")
 
+analysis_result_schema = types.Schema(
+    type=types.Type.OBJECT,
+    properties={
+        "ticker": types.Schema(type=types.Type.STRING),
+        "country": types.Schema(type=types.Type.STRING),
+        "balance_sheet": types.Schema(type=types.Type.STRING),
+        "income_statement": types.Schema(type=types.Type.STRING),
+        "cash_flow": types.Schema(type=types.Type.STRING),
+        "profitability": types.Schema(type=types.Type.STRING),
+        "stability": types.Schema(type=types.Type.STRING),
+        "growth": types.Schema(type=types.Type.STRING),
+        "economic_moat": types.Schema(type=types.Type.STRING),
+        "management_capability": types.Schema(type=types.Type.STRING),
+        "industry_macro_environment": types.Schema(type=types.Type.STRING),
+    },
+    required=[
+        "ticker",
+        "country",
+        "balance_sheet",
+        "income_statement",
+        "cash_flow",
+        "profitability",
+        "stability",
+        "growth",
+        "economic_moat",
+        "management_capability",
+        "industry_macro_environment",
+    ],
+)
+
 def tavily_search(
     query: str,
     topic: Literal["general", "news", "finance"] = "general",
@@ -383,6 +413,10 @@ analyst = LlmAgent(
         ),
     ),
     name="Analyst",
+    generate_content_config=types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=analysis_result_schema,
+    ),
     instruction="""
     You are a seasoned financial analyst.
     Your task is to analyze the provided: {{fundamentals_data}}.
