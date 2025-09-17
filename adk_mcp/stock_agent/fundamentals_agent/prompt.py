@@ -2,9 +2,10 @@ import os
 from pathlib import Path
 import sys
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.append(str(ROOT_DIR))
+# Ensure project root (which contains `utils`) is importable
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
 
 from utils.gcpmanager import GCSManager
 

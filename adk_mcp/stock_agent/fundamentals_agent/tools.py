@@ -1,11 +1,12 @@
 from google.cloud import bigquery
 import json
 import os
-from dotenv import load_dotenv
 
 from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset
-from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
-from mcp import StdioServerParameters
+from google.adk.tools.mcp_tool.mcp_session_manager import (
+    StdioConnectionParams,
+    StdioServerParameters,
+)
 
 GOOGLE_CLOUD_PROJECT = "sayouzone-ai"
 
