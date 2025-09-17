@@ -18,8 +18,8 @@ from google.adk.events import Event
 from google.adk.utils.context_utils import Aclosing
 from pydantic import BaseModel, Field
 
-from stock_agent.fundamentals_agent.tools import fundamentals_mcp_tool
-from stock_agent.fundamentals_agent.prompt import fetch_fundamentals_data_instructions
+from fundamentals_agent.tools import fundamentals_mcp_tool
+from fundamentals_agent.prompt import fetch_fundamentals_data_instructions
 from google.adk.tools import google_search
 from google.adk.tools.set_model_response_tool import SetModelResponseTool
 from tavily import TavilyClient
