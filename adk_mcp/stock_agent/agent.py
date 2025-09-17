@@ -62,8 +62,8 @@ def tavily_search(
     topic: Literal["general", "news", "finance"] = "general",
     search_depth: Literal["basic", "advanced"] = "basic",
     max_results: int = 5,
-    include_answer: Union[bool, Literal["basic", "advanced"]] = "basic",
-    raw_content: Union[Literal["markdown", "text"], bool] = False,
+    include_answer: Literal["none", "basic", "advanced"] = "basic",
+    raw_content: Literal["none", "markdown", "text"] = "none",
     include_images: bool = False,
     include_image_descriptions: bool = False,
     # 시간/범위 필터 (SDK가 제공하는 옵션)
@@ -86,8 +86,8 @@ def tavily_search(
         topic: "general" | "news" | "finance".
         search_depth: "basic" | "advanced".
         max_results: 0~20.
-        include_answer: False | True/"basic" | "advanced".
-        raw_content: False | "markdown" | "text".
+        include_answer: "none" | "basic" | "advanced".
+        raw_content: "none" | "markdown" | "text".
         include_images: 이미지 URL 포함 여부.
         include_image_descriptions: 이미지 설명 포함 여부.
         days/time_range/start_date/end_date: 신선도/기간 필터(뉴스에 유용).
@@ -115,8 +115,8 @@ def tavily_search(
         "topic": topic,
         "search_depth": search_depth,
         "max_results": max_results,
-        "include_answer": include_answer,
-        "include_raw_content": raw_content,
+        "include_answer": include_answer if include_answer != "none" else False,
+        "include_raw_content": False if raw_content == "none" else raw_content,
         "include_images": include_images,
         "include_image_descriptions": include_image_descriptions,
         "timeout": timeout,
@@ -181,7 +181,7 @@ def tavily_search(
     return out
 
 def tavily_extract(
-    urls: Union[str, List[str]],
+    urls: List[str],
     extract_depth: Literal["basic", "advanced"] = "basic",
     format: Literal["markdown", "text"] = "markdown",
     include_images: bool = False,
@@ -207,6 +207,9 @@ def tavily_extract(
             "status": "error",
             "error_message": "환경변수 TAVILY_API_KEY가 설정되어 있지 않습니다.",
         }
+
+    if isinstance(urls, str):  # allow single URL inputs gracefully
+        urls = [urls]
 
     client = TavilyClient(api_key=api_key)
 

@@ -26,3 +26,8 @@ stock_agent/agent.py:297에서 "CountryFinder" 단계에서 self.country_finder�
 AttributeError: 'InvocationContext' object has no attribute 'session_state'. Did you mean: 'session_service'?
 ```
 ctx.session.state를 ctx.session_state로 적어 발생한 오류이다.
+
+```
+ValueError: AnyOf is not supported in function declaration schema for Google AI
+```
+Google AI에서는 여러 타입을 동시에 허용하는 정의를 지원하지 않아서 발생한 오류이다.
