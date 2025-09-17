@@ -312,7 +312,7 @@ class FundamentalsAnalysisAgent(BaseAgent):
             yield event
 
         # Check if fundamentals data before proceeding
-        if "fundamentals_data" not in ctx.session_state or not ctx.session_state["fundamentals_data"]:
+        if "fundamentals_data" not in ctx.session.state or not ctx.session.state["fundamentals_data"]:
             logger.warning(f"[{self.name}] No fundamentals_data found in context after FundamentalsFetcher. Exiting.")
             return
 
@@ -325,7 +325,7 @@ class FundamentalsAnalysisAgent(BaseAgent):
             yield event
         
         # Check if analysis result before proceeding
-        if "analysis_result" not in ctx.session_state or not ctx.session_state["analysis_result"]:
+        if "analysis_result" not in ctx.session.state or not ctx.session.state["analysis_result"]:
             logger.warning(f"[{self.name}] No analysis_result found in context after Analyst. Exiting.")
             return
         

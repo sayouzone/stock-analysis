@@ -22,3 +22,7 @@ ADK WebUI에서 테스트 하던 도중 발생한 오류이다. stock_agent 패�
 KeyError: 'Context variable not found: `fundamentals_data`.'
 ```
 stock_agent/agent.py:297에서 "CountryFinder" 단계에서 self.country_finder이 아닌 self.analyst.run_async(ctx)를 호출하여 생긴 오류이다.
+```
+AttributeError: 'InvocationContext' object has no attribute 'session_state'. Did you mean: 'session_service'?
+```
+ctx.session.state를 ctx.session_state로 적어 발생한 오류이다.
