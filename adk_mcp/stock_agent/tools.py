@@ -54,5 +54,5 @@ fundamentals_mcp_tool = MCPToolset(
             args=['run', "mcp_server/server.py:mcp", "--project", "."],
         ),
     ),
-    tool_filter=['fundamentals'],
+    tool_filter=['find_fnguide_data'],
 )

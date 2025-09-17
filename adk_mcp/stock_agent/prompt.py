@@ -20,5 +20,9 @@ def fetch_fundamentals_data_instructions():
 
     except Exception as e:
         print(f"FATAL: Could not load agent instructions: {e}")
-        # Fallback to a basic instruction if dynamic loading fails
-        return "You are an agent that can query Google Trends data."
+        # Fallback to guidance that still directs the LLM to the fundamentals MCP tool
+        return (
+            "You are an agent that compiles fundamental data for the requested stock. "
+            "Use the MCP tool 'find_fnguide_data' to retrieve FnGuide fundamentals when the ticker is Korean. "
+            "If the tool cannot be used or returns nothing, explain the limitation clearly."
+        )
