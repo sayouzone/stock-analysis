@@ -53,6 +53,7 @@ fundamentals_mcp_tool = MCPToolset(
             command='fastmcp',
             args=['run', "mcp_server/server.py:mcp", "--project", "."],
         ),
+        timeout=30,
     ),
     tool_filter=['find_fnguide_data'],
 )
