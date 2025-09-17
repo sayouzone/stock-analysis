@@ -294,7 +294,7 @@ class FundamentalsAnalysisAgent(BaseAgent):
 
         # 1. Initial Country Finding
         logger.info(f"[{self.name}] Running CountryFinder...")
-        async for event in self.analyst.run_async(ctx):
+        async for event in self.country_finder.run_async(ctx):
             logger.info(f"[{self.name}] Event from CountryFinder: {event.model_dump_json(indent=2, exclude_none=True)}")
             yield event
         
