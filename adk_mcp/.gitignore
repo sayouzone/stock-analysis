@@ -36,6 +36,8 @@ htmlcov/
 *.local
 
 # Node / frontend
+package-lock.json
+package.json
 node_modules/
 frontend/node_modules/
 frontend/.vite/
@@ -53,3 +55,9 @@ docs_cache/
 
 # Docker
 *.tar
+.dockerignore
+Dockerfile
+
+# Ignore compiled files
+cloudbuild.yaml
+
