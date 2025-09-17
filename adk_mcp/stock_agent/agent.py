@@ -396,7 +396,26 @@ analyst = LlmAgent(
     - Economic Moat
     - Management Capability
     - Industry & Macro Environment
-    Ensure your analysis is thorough, evidence-backed, and well-structured.
+
+    Output MUST be a single valid JSON object matching this schema:
+    {
+      "ticker": "...",
+      "country": "...",
+      "balance_sheet": "...",
+      "income_statement": "...",
+      "cash_flow": "...",
+      "profitability": "...",
+      "stability": "...",
+      "growth": "...",
+      "economic_moat": "...",
+      "management_capability": "...",
+      "industry_macro_environment": "..."
+    }
+
+    Rules:
+    - Fill every field with a concise, well-supported narrative paragraph.
+    - Do not emit markdown, bullet lists, or code fences.
+    - Do not include trailing comments or additional text outside the JSON object.
     """,
     input_schema=FundamentalsData,
     output_schema=AnalysisResult,

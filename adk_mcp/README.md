@@ -31,3 +31,9 @@ ctx.session.state를 ctx.session_state로 적어 발생한 오류이다.
 ValueError: AnyOf is not supported in function declaration schema for Google AI
 ```
 Google AI에서는 여러 타입을 동시에 허용하는 정의를 지원하지 않아서 발생한 오류이다.
+```
+pydantic_core._pydantic_core.ValidationError: 1 validation error for AnalysisResult
+  Invalid JSON: expected value at line 1 column 1 [type=json_invalid, input_value='**Constructing the Samsu...ve industry trends."\n}', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.11/v/json_invalid
+```
+analyst 프롬프트에 json 형식으로 출력하는 요구가 없어서 발생한 오류이다.
