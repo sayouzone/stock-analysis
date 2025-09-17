@@ -1,4 +1,6 @@
 import os
+import json
+from copy import deepcopy
 
 import logging
 
@@ -6,17 +8,20 @@ from typing import Dict, List, Union, Optional, Literal, AsyncGenerator, Any
 from typing_extensions import override
 
 from google.adk.agents import LlmAgent, LoopAgent, BaseAgent
+from google.adk.agents.callback_context import CallbackContext
 from google.adk.planners import BuiltInPlanner
 from google.adk.agents.invocation_context import InvocationContext
 from google.genai import types
 from google.adk.sessions import InMemorySessionService
 from google.adk.runners import Runner
 from google.adk.events import Event
+from google.adk.utils.context_utils import Aclosing
 from pydantic import BaseModel, Field
 
 from stock_agent.tools import fundamentals_mcp_tool
 from stock_agent.prompt import fetch_fundamentals_data_instructions
 from google.adk.tools import google_search
+from google.adk.tools.set_model_response_tool import SetModelResponseTool
 from tavily import TavilyClient
 
 full_instruction = fetch_fundamentals_data_instructions()
@@ -57,35 +62,49 @@ class AnalysisResult(BaseModel):
     management_capability : str = Field(description="Evaluation of the company's management capability.")
     industry_macro_environment : str = Field(description="Overview of the industry and macroeconomic environment.")
 
-analysis_result_schema = types.Schema(
-    type=types.Type.OBJECT,
-    properties={
-        "ticker": types.Schema(type=types.Type.STRING),
-        "country": types.Schema(type=types.Type.STRING),
-        "balance_sheet": types.Schema(type=types.Type.STRING),
-        "income_statement": types.Schema(type=types.Type.STRING),
-        "cash_flow": types.Schema(type=types.Type.STRING),
-        "profitability": types.Schema(type=types.Type.STRING),
-        "stability": types.Schema(type=types.Type.STRING),
-        "growth": types.Schema(type=types.Type.STRING),
-        "economic_moat": types.Schema(type=types.Type.STRING),
-        "management_capability": types.Schema(type=types.Type.STRING),
-        "industry_macro_environment": types.Schema(type=types.Type.STRING),
-    },
-    required=[
-        "ticker",
-        "country",
-        "balance_sheet",
-        "income_statement",
-        "cash_flow",
-        "profitability",
-        "stability",
-        "growth",
-        "economic_moat",
-        "management_capability",
-        "industry_macro_environment",
-    ],
+# --- JSON Formatter Agent to ensure valid JSON output ---
+json_formatter = LlmAgent(
+    model=THINKING_MODEL,
+    name="JsonFormatter",
+    instruction="""
+    You are an expert in formatting text into JSON.
+    Your task is to take the provided {{analysis_result}} and ensure it is formatted as a valid JSON object.
+    Ensure the output strictly adheres to JSON syntax, including proper use of braces, brackets, commas, and quotation marks.
+    Do not include any additional text or commentary outside of the JSON object.
+    """,
+    input_schema=AnalysisResult,
+    output_key="analysis_result"
 )
+
+async def run_json_formatter_callback(
+    *, callback_context: CallbackContext
+) -> Optional[types.Content]:
+    """Runs the json_formatter agent and returns its final content.
+
+    The callback mirrors BaseAgent.after_agent_callback contract by using the
+    existing invocation context, copying any state updates produced by the
+    formatter, and returning the formatter's final response so that it becomes
+    the agent reply.
+    """
+
+    # Nothing to format when the intermediate result is missing.
+    current_result = callback_context.state.get("analysis_result")
+    if not current_result:
+        return None
+
+    formatter_ctx = json_formatter._create_invocation_context(
+        callback_context._invocation_context
+    )
+
+    formatted_content: Optional[types.Content] = None
+    async with Aclosing(json_formatter.run_async(formatter_ctx)) as agen:
+        async for event in agen:
+            if event.actions and event.actions.state_delta:
+                callback_context.state.update(event.actions.state_delta)
+            if event.content:
+                formatted_content = event.content
+
+    return formatted_content
 
 def tavily_search(
     query: str,
@@ -268,6 +287,7 @@ class FundamentalsAnalysisAgent(BaseAgent):
     analyst: LlmAgent
     reviewer: LlmAgent
     reviser: LlmAgent
+    json_formatter: LlmAgent
 
     loop_agent: LoopAgent
 
@@ -281,6 +301,7 @@ class FundamentalsAnalysisAgent(BaseAgent):
             analyst: LlmAgent,
             reviewer: LlmAgent,
             reviser: LlmAgent,
+            json_formatter: LlmAgent,
     ):
         """
         Initializes the FundamentalsAnalysisAgent.
@@ -290,6 +311,7 @@ class FundamentalsAnalysisAgent(BaseAgent):
             analyst: An LlmAgent to analyze the fundamentals of a company.
             reviewer: An LlmAgent to review the analysis result.
             reviser: An LlmAgent to revise the analysis result based on commentary.
+            json_formatter: An LlmAgent to enforce JSON formatting on outputs.
         """
 
         # Create internal agents *before* calling super().__init__
@@ -301,7 +323,8 @@ class FundamentalsAnalysisAgent(BaseAgent):
             country_finder,
             fundamentals_fetcher,
             analyst,
-            loop_agent
+            loop_agent,
+            json_formatter,
         ]
 
         super().__init__(
@@ -311,6 +334,7 @@ class FundamentalsAnalysisAgent(BaseAgent):
             analyst=analyst,
             reviewer=reviewer,
             reviser=reviser,
+            json_formatter=json_formatter,
             loop_agent=loop_agent,
             sub_agents=sub_agents_list,
         )
@@ -378,6 +402,7 @@ country_finder = LlmAgent(
     instruction="""
     You are an expert in stock markets and ticker symbols. 
     Your task is to identify the country associated with a given stock ticker symbol from a user's query. 
+    Prefer reasoning from prior knowledge; only make at most a single search call when absolutely necessary.
     Use the provided tool to look up the ticker symbol in a google search and return the corresponding country. 
     If the ticker symbol is not found, respond with 'Unknown'.
     Example:
@@ -413,10 +438,7 @@ analyst = LlmAgent(
         ),
     ),
     name="Analyst",
-    generate_content_config=types.GenerateContentConfig(
-        response_mime_type="application/json",
-        response_schema=analysis_result_schema,
-    ),
+    tools=[SetModelResponseTool(AnalysisResult)],
     instruction="""
     You are a seasoned financial analyst.
     Your task is to analyze the provided: {{fundamentals_data}}.
@@ -430,6 +452,9 @@ analyst = LlmAgent(
     - Economic Moat
     - Management Capability
     - Industry & Macro Environment
+
+    Language requirement:
+    - Write all narrative text in Korean. Use clear, natural Korean suitable for professional financial reports.
 
     Output MUST be a single valid JSON object matching this schema:
     {
@@ -452,9 +477,10 @@ analyst = LlmAgent(
     - Do not include trailing comments or additional text outside the JSON object.
     """,
     input_schema=FundamentalsData,
-    output_schema=AnalysisResult,
-    output_key="analysis_result"
+    output_key="analysis_result",
+    after_agent_callback=run_json_formatter_callback
 )
+
 
 reviewer = LlmAgent(
     model=THINKING_MODEL,
@@ -470,6 +496,9 @@ reviewer = LlmAgent(
     Your task is to review the provided: {{fundamentals_data}}, {{analysis_result}}.
     Identify any gaps, inconsistencies, or areas that need further clarification or evidence.
     Provide constructive feedback and specific suggestions for improvement.
+
+    Language requirement:
+    - Write your review comments in Korean.
     """,
     input_schema=AnalysisResult,
     output_key="review_comments"
@@ -489,11 +518,14 @@ reviser = LlmAgent(
     Your task is to revise the provided: {{fundamentals_data}}, {{analysis_result}} based on the review comments: {{review_comments}}.
     Address each comment with specific improvements, additional evidence, or clarifications as needed.
     Ensure the revised analysis is comprehensive, accurate, and well-supported.
+
+    Language requirement:
+    - Ensure all narrative fields in the final JSON remain in Korean.
     """,
     input_schema=AnalysisResult,
-    output_key="analysis_result"
+    output_key="analysis_result",
+    after_agent_callback=run_json_formatter_callback
 )
-
 fundamentals_analysis_agent = FundamentalsAnalysisAgent(
     name="FundamentalsAnalysisAgent",
     country_finder=country_finder,
@@ -501,6 +533,7 @@ fundamentals_analysis_agent = FundamentalsAnalysisAgent(
     analyst=analyst,
     reviewer=reviewer,
     reviser=reviser,
+    json_formatter=json_formatter,
 )
 
 # FastMCP 및 ADK 로더가 찾을 수 있도록 루트 에이전트 별칭을 노출한다.
