@@ -3,6 +3,10 @@ import json
 import os
 from dotenv import load_dotenv
 
+from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset
+from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
+from mcp import StdioServerParameters
+
 GOOGLE_CLOUD_PROJECT = "sayouzone-ai"
 
 def clean_sql_query(text):
@@ -42,3 +46,13 @@ def execute_bigquery_sql(sql: str) -> str:
             )
     except Exception as e:
         return f"Error executing BigQuery query: {str(e)}"
+
+fundamentals_mcp_tool = MCPToolset(
+    connection_params=StdioConnectionParams(
+        server_params = StdioServerParameters(
+            command='fastmcp',
+            args=['run', "mcp_server/server.py:mcp", "--project", "."],
+        ),
+    ),
+    tool_filter=['fundamentals'],
+)

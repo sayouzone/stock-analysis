@@ -12,3 +12,13 @@ google adk는 따로 client를 구성할 필요 없이 MCPToolset이 따로 있�
 ## 테스트
 
 ## 오류
+```
+ValueError: No root_agent found for 'stock_agent'. Searched in 'stock_agent.agent.root_agent', 'stock_agent.root_agent' and 'stock_agent/root_agent.yaml'. Ensure '/Users/kimchan-woo/Desktop/sayouzone/stock-analysis/stock-analysis/adk_mcp/stock_agent' is structured correctly, an .env file can be loaded if present, and a root_agent is exposed.
+```
+ADK WebUI에서 테스트 하던 도중 발생한 오류이다. stock_agent 패키지에서 root_agent 심볼을 찾지 못해 발생한 에러이다.
+기존 커스텀 에이전트를 root_agent로 지정하였다.
+
+```
+KeyError: 'Context variable not found: `fundamentals_data`.'
+```
+stock_agent/agent.py:297에서 "CountryFinder" 단계에서 self.country_finder이 아닌 self.analyst.run_async(ctx)를 호출하여 생긴 오류이다.

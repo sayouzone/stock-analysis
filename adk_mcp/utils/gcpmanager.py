@@ -41,6 +41,20 @@ class GCSManager:
         except Exception as e:
             print(f"파일 업로드 중 심각한 에러 발생: {e}")
             return False
+    
+    def read_file(self, blob_name):
+        print(f"파일 읽기 시작: '{blob_name}'")
+        try:
+            bucket = self.storage_client.bucket(self.bucket_name)
+            blob = bucket.blob(blob_name)
+
+            content = blob.download_as_text()
+
+            print("파일 읽기 성공!")
+            return content
+        except Exception as e:
+            print(f"파일 읽기 중 심각한 에러 발생: {e}")
+            return None
 
 class BQManager:
     _dataset_checked = False
