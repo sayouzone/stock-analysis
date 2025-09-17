@@ -299,7 +299,7 @@ class FundamentalsAnalysisAgent(BaseAgent):
             yield event
         
         # Check if analysis result before proceeding
-        if "stock_country" not in ctx.session_state or not ctx.session_state["stock_country"]:
+        if "stock_country" not in ctx.session.state or not ctx.session.state["stock_country"]:
             logger.warning(f"[{self.name}] No stock_country found in context after CountryFinder. Exiting.")
             return
 
