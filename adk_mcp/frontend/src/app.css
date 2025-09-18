@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+	--bg: 210 40% 98%;
+	--foreground: 220 25% 15%;
+	--card: 0 0% 100%;
+	--card-foreground: 220 25% 15%;
+	--border: 220 14% 90%;
+	--ring: 220 90% 56%;
+	--muted: 220 14% 96%;
+	--muted-foreground: 220 10% 45%;
+	--accent: 210 100% 48%;
+	--accent-foreground: 0 0% 100%;
+
+	--brand-50: 214 95% 93%;
+	--brand-100: 213 97% 87%;
+	--brand-200: 212 96% 78%;
+	--brand-300: 210 96% 68%;
+	--brand-400: 212 92% 60%;
+	--brand-500: 213 90% 52%;
+	--brand-600: 215 86% 45%;
+	--brand-700: 217 82% 39%;
+	--brand-800: 215 79% 30%;
+	--brand-900: 221 67% 21%;
+}
+
+.dark {
+	--bg: 220 30% 7%;
+	--foreground: 0 0% 100%;
+	--card: 220 22% 10%;
+	--card-foreground: 0 0% 100%;
+	--border: 220 10% 22%;
+	--ring: 213 90% 52%;
+	--muted: 220 14% 12%;
+	--muted-foreground: 220 14% 65%;
+	--accent: 213 90% 52%;
+	--accent-foreground: 0 0% 100%;
+}
+
+@layer base {
+	* { @apply border-border; }
+	html { color-scheme: light dark; }
+	body { @apply bg-bg text-foreground antialiased; }
+}
+
+@layer components {
+	.card { @apply rounded-xl bg-card shadow-card border p-4 md:p-6; }
+	.badge { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium bg-muted text-muted-foreground; }
+	.btn { @apply inline-flex items-center justify-center rounded-md bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-500 active:bg-brand-700; }
+	.input { @apply w-full rounded-md border bg-white/50 px-3 py-2 text-sm outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-brand-400 dark:bg-card; }
+	.chips { @apply flex flex-wrap gap-2; }
+}
+
+.container-12 { @apply grid grid-cols-12 gap-2 md:gap-3 lg:gap-4; }

@@ -19,3 +19,4 @@ lxml
 html5lib
 yfinance
 OpenDartReader
+google-cloud-secret-manager

@@ -1,54 +1,48 @@
+import logging
 import os
 from pathlib import Path
 import sys
 
-# Ensure project root (which contains `utils`) is importable
+# utils 모듈을 import 할 수 있도록 프로젝트 루트를 python path에 추가한다.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 from utils.gcpmanager import GCSManager
 
+logger = logging.getLogger(__name__)
+
+INLINE_FALLBACK = (
+    "당신은 요청된 종목의 펀더멘털 데이터를 수집·정리하는 에이전트입니다. "
+    "도구 호출은 최소화하되 반드시 근거를 남기세요. 한국 종목이라면 'fundamentals_mcp_tool' 호출은 최대 1회만 시도하고, "
+    "정성 항목은 'tavily_search'를 주제별로 1회씩만 사용하세요. 실패하거나 근거를 찾지 못하면 해당 필드에 '근거 부족'이라고 명확히 남기십시오."
+)
+
+
 def fetch_fundamentals_data_instructions():
-    """Load agent instructions from GCS if configured, otherwise fall back to local file.
+    """GCS에서 펀더멘털 분석 지침을 로드한다.
 
-    Order of precedence:
-    1) GCS (when PROMPT_BLOB is set and readable)
-    2) Local file at project root: fetch_fundamentals_data.md
-    3) Minimal inline fallback guidance
+    - 환경 변수 `PROMPT_BLOB`에 GCS 경로(디렉터리)를 지정해야 한다.
+    - 파일은 해당 경로 하위의 `fetch_fundamentals_data.md`로 고정된다.
+    - 로컬 파일은 더 이상 읽지 않으며, 실패 시 최소한의 한국어 기본 지침을 반환한다.
     """
-    # 1) Try GCS when PROMPT_BLOB is set
-    blob_path = os.getenv("PROMPT_BLOB")
-    if blob_path:
-        try:
-            file_path = blob_path.rstrip("/") + "/fetch_fundamentals_data.md"
-            full_instruction = GCSManager().read_file(file_path)
-            if full_instruction:
-                print("Successfully loaded instructions from GCS.")
-                return full_instruction
-            else:
-                print("GCS returned empty content; falling back to local file.")
-        except Exception as e:
-            print(f"Warning: GCS load failed: {e}. Falling back to local file.")
 
-    # 2) Try local file next
+    blob_root = os.getenv("PROMPT_BLOB")
+    if not blob_root:
+        logger.error("PROMPT_BLOB 환경 변수가 설정되어 있지 않아 GCS 지침을 불러올 수 없습니다.")
+        return INLINE_FALLBACK
+
+    gcs_path = Path(blob_root) / "fetch_fundamentals_data.md"
+
     try:
-        project_root = Path(__file__).resolve().parents[2]
-        local_path = project_root / "fetch_fundamentals_data.md"
-        if local_path.exists():
-            content = local_path.read_text(encoding="utf-8")
-            print("Successfully loaded instructions from local file.")
-            return content
-        else:
-            print(f"Local instruction file not found at: {local_path}")
-    except Exception as e:
-        print(f"Warning: Local file load failed: {e}")
+        payload = GCSManager().read_file(str(gcs_path))
+    except Exception as exc:
+        logger.error("GCS 지침 파일 로딩 중 오류 발생 (%s): %s", gcs_path, exc)
+        return INLINE_FALLBACK
 
-    # 3) Minimal inline fallback
-    print("FATAL: Could not load agent instructions; using inline fallback guidance.")
-    return (
-        "You are an agent that compiles fundamental data for the requested stock. "
-        "Minimize tool calls: call 'find_fnguide_data' at most once for Korean tickers; "
-        "use 'tavily_search' once per qualitative field and batch 'tavily_extract' calls. "
-        "If a tool fails or returns nothing, leave the structured field null or write '근거 부족' for qualitative notes."
-    )
+    if not payload:
+        logger.error("GCS 지침 파일이 비어있거나 존재하지 않습니다: %s", gcs_path)
+        return INLINE_FALLBACK
+
+    logger.info("펀더멘털 지침을 GCS에서 성공적으로 불러왔습니다: %s", gcs_path)
+    return payload

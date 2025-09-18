@@ -6,7 +6,6 @@ import requests
 from utils.companydict import companydict
 from utils import gcpmanager
 from bs4 import BeautifulSoup, Tag
-from dotenv import load_dotenv
 import os
 from contextlib import contextmanager
 from typing import cast
@@ -26,8 +25,6 @@ def change_dir(destination):
         if cwd is not None:
             os.chdir(cwd)
 
-load_dotenv()
-
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
 
 class OpenDartCrawler:
@@ -42,7 +39,7 @@ class OpenDartCrawler:
         if not bucket_name:
             raise ValueError("GCS_BUCKET_NAME이 .env 파일에 설정되지 않았습니다!")
 
-        dart_api_key = "746df482bd123aa8acc6b8df2cd650bb67083299"
+        dart_api_key = os.environ.get("DART_API_KEY")
         if not dart_api_key:
             raise ValueError("DART_API_KEY not found in environment variables.")
 

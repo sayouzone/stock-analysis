@@ -37,13 +37,10 @@ COPY utils/ ./utils/
 # Copy frontend build from previous stage
 COPY --from=frontend-builder /app/frontend/build ./frontend/build/
 
-# 💡 3. --build-arg "FRONTEND_URL=..." 로 전달된 값을 받기 위해 ARG 선언
-ARG FRONTEND_URL
-
-# 💡 4. 받은 ARG 값을 ENV로 설정하여 FastAPI 런타임이 사용하도록 함
-ENV FRONTEND_URL=${FRONTEND_URL}
+# Set runtime environment variables
 ENV HOST=0.0.0.0
 ENV PORT=8080
+# ENVIRONMENT, GCP_PROJECT_ID 등은 Cloud Run 서비스에서 직접 설정합니다.
 
 # Run the application
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

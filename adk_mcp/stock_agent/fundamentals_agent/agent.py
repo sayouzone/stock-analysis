@@ -20,8 +20,8 @@ from google.adk.events import Event
 from google.adk.utils.context_utils import Aclosing
 from pydantic import BaseModel, Field
 
-from fundamentals_agent.tools import fundamentals_mcp_tool
-from fundamentals_agent.prompt import fetch_fundamentals_data_instructions
+from stock_agent.fundamentals_agent.tools import fundamentals_mcp_tool
+from stock_agent.fundamentals_agent.prompt import fetch_fundamentals_data_instructions
 from google.adk.tools import google_search
 from google.adk.tools.set_model_response_tool import SetModelResponseTool
 from tavily import TavilyClient
@@ -444,7 +444,9 @@ fundamentals_fetcher = LlmAgent(
     instruction=full_instruction,
     output_schema=FundamentalsData,
     output_key="fundamentals_data",
-    tools=[fundamentals_mcp_tool, tavily_search, tavily_extract]
+    tools=[fundamentals_mcp_tool, tavily_search, tavily_extract],
+    disallow_transfer_to_parent=True,
+    disallow_transfer_to_peers=True
 )
 
 analyst = LlmAgent(
@@ -568,7 +570,9 @@ rater = LlmAgent(
     """,
     input_schema=AnalysisResult,
     output_schema=RatingResult,
-    output_key="rating"
+    output_key="rating",
+    disallow_transfer_to_parent=True,
+    disallow_transfer_to_peers=True
 )
 
 fundamentals_analysis_agent = FundamentalsAnalysisAgent(
