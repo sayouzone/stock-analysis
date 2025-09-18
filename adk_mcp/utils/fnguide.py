@@ -10,6 +10,21 @@ import io
 import re
 
 class Fundamentals:
+    JSON_NAMES = ["market_conditions", "earning_issue", "analysis"]
+    CSV_NAMES = [
+        "holdings_status",
+        "governance",
+        "shareholders",
+        "industry_comparison",
+        "bond_rating",
+        "financialhighlight_annual",
+        "financialhighlight_netquarter",
+    ]
+    CSV_SERIES_NAMES = {
+        "financialhighlight_annual",
+        "financialhighlight_netquarter",
+    }
+
     def __init__(self, stock : str = '005930'):
         self.stock = stock
         self.url = f'https://comp.fnguide.com/SVO2/ASP/SVD_main.asp?pGB=1&gicode=A{stock}'
@@ -20,20 +35,25 @@ class Fundamentals:
             self.stock = stock
             self.url = f'https://comp.fnguide.com/SVO2/ASP/SVD_main.asp?pGB=1&gicode=A{stock}'
 
-        request = requests.get(self.url)
+        folder_name = f"/FnGuide/{self.stock}/"
+        existing_files = set(self.gcs.list_files(folder_name=folder_name))
 
-        soup = BeautifulSoup(request.text, 'lxml')
-        tables = soup.find_all('table')
+        processed_data = self._load_from_gcs(folder_name, existing_files)
+        if processed_data is None:
+            request = requests.get(self.url)
 
-        processed_data = self._df_mapping(tables)
+            soup = BeautifulSoup(request.text, 'lxml')
+            tables = soup.find_all('table')
 
-        # GCS에 데이터를 업로드합니다.
-        self.upload_to_gcs(processed_data)
+            processed_data = self._df_mapping(tables)
+
+            # GCS에 데이터를 업로드합니다.
+            self.upload_to_gcs(processed_data, existing_files=existing_files)
 
         # API가 반환할 수 있도록 데이터를 직렬화 가능한 딕셔너리 형태로 가공합니다.
         return_data = {}
-        json_names = ["market_conditions", "earning_issue", "analysis"]
-        df_names = ["holdings_status", "governance", "shareholders", "industry_comparison", "bond_rating", "financialhighlight_annual", "financialhighlight_netquarter"]
+        json_names = self.JSON_NAMES
+        df_names = self.CSV_NAMES
 
         for i, json_str in enumerate(processed_data.get("json", [])):
             return_data[json_names[i]] = json.loads(json_str)
@@ -138,14 +158,51 @@ class Fundamentals:
             "to_csv" : [holdings_status, governance, shareholders, industry_comparison, bond_rating, financialhighlight_annual, financialhighlight_netquarter]
         }
         
+    def _load_from_gcs(self, folder_name: str, existing_files: set[str]):
+        """필요한 파일이 모두 존재하면 GCS에서 데이터를 불러옵니다."""
+        required_paths = {
+            f"{folder_name}{name}.json" for name in self.JSON_NAMES
+        } | {
+            f"{folder_name}{name}.csv" for name in self.CSV_NAMES
+        }
+
+        if not required_paths.issubset(existing_files):
+            return None
+
+        try:
+            json_payloads = []
+            for name in self.JSON_NAMES:
+                blob_name = f"{folder_name}{name}.json"
+                content = self.gcs.read_file(blob_name)
+                if content is None:
+                    return None
+                json_payloads.append(content)
+
+            csv_payloads = []
+            for name in self.CSV_NAMES:
+                blob_name = f"{folder_name}{name}.csv"
+                content = self.gcs.read_file(blob_name)
+                if content is None:
+                    return None
+                frame = pd.read_csv(io.StringIO(content), index_col=0)
+                if name in self.CSV_SERIES_NAMES:
+                    frame = frame.squeeze("columns")
+                csv_payloads.append(frame)
+
+            return {"json": json_payloads, "to_csv": csv_payloads}
+        except Exception as exc:
+            print(f"GCS 데이터 로드 중 오류 발생: {exc}")
+            return None
+
     
-    def upload_to_gcs(self, processed_data: dict):
+    def upload_to_gcs(self, processed_data: dict, *, existing_files: set[str] | None = None):
         """처리된 데이터를 GCS에 업로드합니다."""
-        json_names = ["market_conditions", "earning_issue", "analysis"]
-        csv_names = ["holdings_status", "governance", "shareholders", "industry_comparison", "bond_rating", "financialhighlight_annual", "financialhighlight_netquarter"]
+        json_names = self.JSON_NAMES
+        csv_names = self.CSV_NAMES
 
         folder_name = f"/FnGuide/{self.stock}/"
-        existing_files = set(self.gcs.list_files(folder_name=folder_name))
+        if existing_files is None:
+            existing_files = set(self.gcs.list_files(folder_name=folder_name))
         # JSON 데이터 업로드
         for i, json_data in enumerate(processed_data.get("json", [])):
             if i < len(json_names):

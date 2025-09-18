@@ -23,6 +23,7 @@ from fundamentals_agent.prompt import fetch_fundamentals_data_instructions
 from google.adk.tools import google_search
 from google.adk.tools.set_model_response_tool import SetModelResponseTool
 from tavily import TavilyClient
+from utils.gcpmanager import GCSManager
 
 full_instruction = fetch_fundamentals_data_instructions()
 
@@ -587,5 +588,16 @@ async def call_agent_async(user_input_ticker: str):
                                                 session_id=SESSION_ID)
     print("Final Session State:")
     import json
-    print(json.dumps(final_session.state, indent=2))
+    final_result = json.dumps(final_session.state, indent=2)
+    gcs_bucket_name = os.getenv("GOOGLE_CLOUD_STORAGE_BUCKET")
+    gcs_manager = GCSManager(bucket_name=gcs_bucket_name) if gcs_bucket_name else GCSManager()
+    destination_blob = "Fundamentals/agent_fundamentals_analysis_result.json"
+    gcs_manager.upload_file(
+        source_file=final_result,
+        destination_blob_name=destination_blob,
+        encoding="utf-8",
+        content_type="application/json; charset=utf-8",
+    )
+    print(final_result)
     print("-------------------------------\n")
+    return final_response, final_result
