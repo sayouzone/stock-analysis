@@ -25,13 +25,29 @@ class GCSManager:
             print(f"파일 목록 조회 중 심각한 에러 발생: {e}")
             return []
 
-    def upload_file(self, source_file, destination_blob_name):
+    def upload_file(self, source_file, destination_blob_name, *, encoding: str = "utf-8", content_type: str | None = None):
         print(f"파일 업로드 시작: '{destination_blob_name}'")
         try:
             bucket = self.storage_client.bucket(self.bucket_name)
             blob = bucket.blob(destination_blob_name)
 
-            blob.upload_from_string(source_file)
+            if isinstance(source_file, str):
+                payload = source_file.encode(encoding)
+            elif isinstance(source_file, (bytes, bytearray)):
+                payload = bytes(source_file)
+            elif hasattr(source_file, "read"):
+                data = source_file.read()
+                if isinstance(data, str):
+                    payload = data.encode(encoding)
+                elif isinstance(data, (bytes, bytearray)):
+                    payload = bytes(data)
+                else:
+                    raise TypeError("Unsupported stream data type for upload")
+            else:
+                raise TypeError("source_file must be a str, bytes-like, or readable object")
+
+            upload_kwargs = {"content_type": content_type} if content_type else {}
+            blob.upload_from_string(payload, **upload_kwargs)
 
             print("파일 업로드 성공!")
             return True

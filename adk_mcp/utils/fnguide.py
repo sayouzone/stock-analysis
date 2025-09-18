@@ -145,21 +145,33 @@ class Fundamentals:
         csv_names = ["holdings_status", "governance", "shareholders", "industry_comparison", "bond_rating", "financialhighlight_annual", "financialhighlight_netquarter"]
 
         folder_name = f"/FnGuide/{self.stock}/"
-        search = self.gcs.list_files(folder_name=folder_name)
+        existing_files = set(self.gcs.list_files(folder_name=folder_name))
         # JSON 데이터 업로드
         for i, json_data in enumerate(processed_data.get("json", [])):
-            if json_names[i] in search:
-                continue
             if i < len(json_names):
-                file_name = f"/FnGuide/{self.stock}/{json_names[i]}.json"
-                self.gcs.upload_file(source_file=json_data, destination_blob_name=file_name)
+                file_name = f"{folder_name}{json_names[i]}.json"
+                if file_name in existing_files:
+                    continue
+                self.gcs.upload_file(
+                    source_file=json_data,
+                    destination_blob_name=file_name,
+                    encoding="utf-8",
+                    content_type="application/json; charset=utf-8",
+                )
+                existing_files.add(file_name)
 
         # CSV 데이터(DataFrame/Series) 업로드
         for i, df_data in enumerate(processed_data.get("to_csv", [])):
-            if csv_names[i] in search:
-                continue
             if i < len(csv_names):
                 file_name = f"{folder_name}" + f"{csv_names[i]}.csv"
+                if file_name in existing_files:
+                    continue
                 # DataFrame/Series를 CSV 문자열로 변환하여 업로드
                 csv_string = df_data.to_csv()
-                self.gcs.upload_file(source_file=csv_string, destination_blob_name=file_name)
+                self.gcs.upload_file(
+                    source_file=csv_string,
+                    destination_blob_name=file_name,
+                    encoding="utf-8",
+                    content_type="text/csv; charset=utf-8",
+                )
+                existing_files.add(file_name)
