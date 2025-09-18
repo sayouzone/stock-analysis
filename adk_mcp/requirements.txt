@@ -3,6 +3,7 @@ uvicorn
 python-multipart
 beautifulsoup4
 requests
+google-cloud-bigquery[bqstorage,pandas]
 google-cloud-storage
 google-cloud-aiplatform
 google-adk
@@ -18,4 +19,3 @@ lxml
 html5lib
 yfinance
 OpenDartReader
-httpx
