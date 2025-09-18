@@ -35,7 +35,7 @@ class Fundamentals:
             self.stock = stock
             self.url = f'https://comp.fnguide.com/SVO2/ASP/SVD_main.asp?pGB=1&gicode=A{stock}'
 
-        folder_name = f"/FnGuide/{self.stock}/"
+        folder_name = f"/Fundamentals/FnGuide/{self.stock}/"
         existing_files = set(self.gcs.list_files(folder_name=folder_name))
 
         processed_data = self._load_from_gcs(folder_name, existing_files)
