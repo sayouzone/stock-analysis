@@ -1,10 +1,12 @@
 import os
 import json
 from copy import deepcopy
+from datetime import date, datetime
+from decimal import Decimal
 
 import logging
 
-from typing import Dict, List, Union, Optional, Literal, AsyncGenerator, Any
+from typing import Dict, List, Optional, Literal, AsyncGenerator, Any
 from typing_extensions import override
 
 from google.adk.agents import LlmAgent, LoopAgent, BaseAgent
@@ -62,6 +64,11 @@ class AnalysisResult(BaseModel):
     economic_moat : str = Field(description="Assessment of the company's economic moat.")
     management_capability : str = Field(description="Evaluation of the company's management capability.")
     industry_macro_environment : str = Field(description="Overview of the industry and macroeconomic environment.")
+
+class RatingResult(BaseModel):
+    score: int = Field(description="Numerical score from 1 to 100")
+    rate: str = Field(description="Qualitative rating: excellent, good, normal, warning")
+    justification: Optional[str] = Field(default=None, description="Short explanation for the rating")
 
 # --- JSON Formatter Agent to ensure valid JSON output ---
 json_formatter = LlmAgent(
@@ -159,7 +166,6 @@ def tavily_search(
 
     client = TavilyClient(api_key=api_key)
 
-    # Tavily SDK 파라미터 구성 (문서 기준)
     params: Dict[str, Any] = {
         "query": query,
         "topic": topic,
@@ -172,7 +178,6 @@ def tavily_search(
         "timeout": timeout,
     }
 
-    # 선택 파라미터만 주입
     if include_domains:
         params["include_domains"] = include_domains
     if exclude_domains:
@@ -180,7 +185,6 @@ def tavily_search(
     if country:
         params["country"] = country
 
-    # 기간 관련: 문서에 따라 news 토픽에서 days 사용, time_range/start/end도 지원
     if days is not None:
         params["days"] = days
     if time_range is not None:
@@ -288,6 +292,7 @@ class FundamentalsAnalysisAgent(BaseAgent):
     analyst: LlmAgent
     reviewer: LlmAgent
     reviser: LlmAgent
+    rater: LlmAgent
     json_formatter: LlmAgent
 
     loop_agent: LoopAgent
@@ -302,6 +307,7 @@ class FundamentalsAnalysisAgent(BaseAgent):
             analyst: LlmAgent,
             reviewer: LlmAgent,
             reviser: LlmAgent,
+            rater: LlmAgent,
             json_formatter: LlmAgent,
     ):
         """
@@ -312,6 +318,7 @@ class FundamentalsAnalysisAgent(BaseAgent):
             analyst: An LlmAgent to analyze the fundamentals of a company.
             reviewer: An LlmAgent to review the analysis result.
             reviser: An LlmAgent to revise the analysis result based on commentary.
+            rater: An LlmAgent to score the final analysis outcome.
             json_formatter: An LlmAgent to enforce JSON formatting on outputs.
         """
 
@@ -325,6 +332,7 @@ class FundamentalsAnalysisAgent(BaseAgent):
             fundamentals_fetcher,
             analyst,
             loop_agent,
+            rater,
             json_formatter,
         ]
 
@@ -335,6 +343,7 @@ class FundamentalsAnalysisAgent(BaseAgent):
             analyst=analyst,
             reviewer=reviewer,
             reviser=reviser,
+            rater=rater,
             json_formatter=json_formatter,
             loop_agent=loop_agent,
             sub_agents=sub_agents_list,
@@ -393,6 +402,14 @@ class FundamentalsAnalysisAgent(BaseAgent):
         logger.info(f"[{self.name}] Running ReviewerReviserLoop...")
         async for event in self.loop_agent.run_async(ctx):
             logger.info(f"[{self.name}] Event from ReviewerReviserLoop: {event.model_dump_json(indent=2, exclude_none=True)}")
+            yield event
+        
+        logger.info(f"[{self.name}]")
+
+        # 5. Rating for finalcial analysis quality
+        logger.info(f"[{self.name}] Running Rater...")
+        async for event in self.rater.run_async(ctx):
+            logger.info(f"[{self.name}] Event from Rater: {event.model_dump_json(indent=2, exclude_none=True)}")
             yield event
         
         logger.info(f"[{self.name}] Completed all steps.")
@@ -527,6 +544,33 @@ reviser = LlmAgent(
     output_key="analysis_result",
     after_agent_callback=run_json_formatter_callback
 )
+
+rater = LlmAgent(
+    model=THINKING_MODEL,
+    name="Rater",
+    instruction="""
+    You are an expert financial analyst.
+    Your task is to rate the quality of the provided {{analysis_result}} on a scale from 1 to 100,
+    considering accuracy, depth, clarity, and relevance.
+    Provide a brief justification for your rating.
+    Output must be a JSON object with the following fields:
+    {
+      "score": <1-100>,
+      "rate": "excellent" | "good" | "normal" | "warning",
+      "justification": "short explanation"
+    }
+
+    score guide:
+    85-100: excellent
+    70-84: good
+    55-69: normal
+    -54: warning
+    """,
+    input_schema=AnalysisResult,
+    output_schema=RatingResult,
+    output_key="rating"
+)
+
 fundamentals_analysis_agent = FundamentalsAnalysisAgent(
     name="FundamentalsAnalysisAgent",
     country_finder=country_finder,
@@ -534,6 +578,7 @@ fundamentals_analysis_agent = FundamentalsAnalysisAgent(
     analyst=analyst,
     reviewer=reviewer,
     reviser=reviser,
+    rater=rater,
     json_formatter=json_formatter,
 )
 
@@ -557,6 +602,12 @@ async def call_agent_async(user_input_ticker: str):
     """
     Sends a new topic to the agent (overwriting the initial one if needed)
     and runs the workflow.
+
+    Returns:
+        tuple[str, str, dict | None]:
+            - final natural-language response from the agent (if any)
+            - JSON string representation of the final session state (uploaded to GCS)
+            - rating output from the rater agent as a dictionary, if produced
     """
 
     session_service, runner = await setup_session_and_runner()
@@ -588,10 +639,39 @@ async def call_agent_async(user_input_ticker: str):
                                                 session_id=SESSION_ID)
     print("Final Session State:")
     import json
-    final_result = json.dumps(final_session.state, indent=2)
+    session_state = final_session.state
+    if isinstance(session_state, dict):
+        final_state = dict(session_state)
+    else:
+        final_state = dict(session_state.items())
+    def _to_serializable(value):
+        if hasattr(value, "model_dump"):
+            return _to_serializable(value.model_dump())
+        if isinstance(value, dict):
+            return {k: _to_serializable(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [_to_serializable(v) for v in value]
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        if isinstance(value, Decimal):
+            return float(value)
+        return value
+
+    final_state = _to_serializable(final_state)
+
+    if final_response and final_response != "No final response captured.":
+        final_state["agent_final_response"] = final_response
+
+    raw_rating = final_state.get("rating")
+    if hasattr(raw_rating, "model_dump"):
+        final_rating = raw_rating.model_dump()
+        final_state["rating"] = final_rating
+    else:
+        final_rating = raw_rating
+    final_result = json.dumps(final_state, indent=2, ensure_ascii=False, default=str)
     gcs_bucket_name = os.getenv("GOOGLE_CLOUD_STORAGE_BUCKET")
     gcs_manager = GCSManager(bucket_name=gcs_bucket_name) if gcs_bucket_name else GCSManager()
-    destination_blob = "Fundamentals/agent_fundamentals_analysis_result.json"
+    destination_blob = f"Fundamentals/{user_input_ticker}.json"
     gcs_manager.upload_file(
         source_file=final_result,
         destination_blob_name=destination_blob,
@@ -599,5 +679,8 @@ async def call_agent_async(user_input_ticker: str):
         content_type="application/json; charset=utf-8",
     )
     print(final_result)
+    if final_rating:
+        print("\nRating Result:")
+        print(json.dumps(final_rating, indent=2, ensure_ascii=False))
     print("-------------------------------\n")
-    return final_response, final_result
+    return final_response, final_result, final_rating
