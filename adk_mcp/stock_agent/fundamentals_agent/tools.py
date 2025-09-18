@@ -56,5 +56,5 @@ fundamentals_mcp_tool = MCPToolset(
         ),
         timeout=30,
     ),
-    tool_filter=['find_fnguide_data'],
+    tool_filter=['find_fnguide_data', 'find_yahoofinance_data'],
 )

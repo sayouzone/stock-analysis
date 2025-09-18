@@ -3,11 +3,12 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import Literal
 from utils.companydict import companydict as find
-from utils.gcpmanager import BQManager
+from utils.gcpmanager import BQManager, GCSManager
 import requests
 from bs4 import BeautifulSoup
 import asyncio
 from typing import AsyncGenerator, Dict, Any
+import re
 
 class News:
     def __init__(self):
@@ -300,6 +301,8 @@ class Market:
 class Fundamentals:
     def __init__(self):
         self.bq_manager = BQManager() # Added for consistency, even if not used for caching here
+        self.gcs_manager = GCSManager()
+
     def fundamentals(self, query: str, attribute_name_str: Literal[ # Renamed from 'get' to 'fundamentals' for router compatibility
         "income_stmt", "quarterly_income_stmt", "ttm_income_stmt", "balance_sheet", "cashflow", "quarterly_cashflow",
         "ttm_cashflow", "sustainability", "earnings_estimate", "revenue_estimate", "earnings_history", "eps_trend",
@@ -333,8 +336,48 @@ class Fundamentals:
             else:
                 print(f"  - 데이터: {data_attribute}")
 
+            if isinstance(data_attribute, (pd.DataFrame, pd.Series)):
+                self._upload_table_to_gcs(
+                    ticker_symbol=ticker_symbol,
+                    attribute_name=attribute_name_str,
+                    data_table=data_attribute,
+                )
+
             return data_attribute
 
         except Exception as e:
             print(f"예상치 못한 오류 발생: {e}")
         return None
+
+    def _upload_table_to_gcs(self, *, ticker_symbol: str, attribute_name: str, data_table: pd.DataFrame | pd.Series):
+        """Upload DataFrame/Series fundamentals data to GCS following FnGuide naming rules."""
+        if getattr(self.gcs_manager, "_storage_available", False) is False:
+            print("GCS 클라이언트가 비활성화되어 업로드를 건너뜁니다.")
+            return
+
+        if isinstance(data_table, pd.DataFrame) and data_table.empty:
+            print("업로드할 데이터프레임이 비어 있어 업로드를 건너뜁니다.")
+            return
+
+        folder_name = self._build_folder_path(ticker_symbol)
+        existing_files = set(self.gcs_manager.list_files(folder_name=folder_name))
+        file_name = f"{folder_name}{attribute_name}.csv"
+
+        if file_name in existing_files:
+            print(f"'{file_name}' 파일이 이미 존재하여 업로드를 건너뜁니다.")
+            return
+
+        csv_payload = data_table.to_csv()
+        self.gcs_manager.upload_file(
+            source_file=csv_payload,
+            destination_blob_name=file_name,
+            encoding="utf-8",
+            content_type="text/csv; charset=utf-8",
+        )
+
+    def _build_folder_path(self, ticker_symbol: str) -> str:
+        """Build the Yahoo Finance fundamentals folder path for the provided ticker."""
+        now = datetime.now()
+        current_quarter = f"{now.year}-Q{((now.month - 1) // 3) + 1}"
+        safe_ticker = re.sub(r"[^0-9A-Za-z_-]", "_", ticker_symbol)
+        return f"/Fundamentals/YahooFinance/{safe_ticker}/{current_quarter}/"
