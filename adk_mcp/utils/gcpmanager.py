@@ -81,15 +81,35 @@ class GCSManager:
             self.storage_client = None
             self._storage_available = False
 
+    @staticmethod
+    def _normalize_blob_name(name: str) -> str:
+        return name.lstrip("/")
+
     def list_files(self, folder_name=None, sort_by_time=True):
         print(f"'{folder_name if folder_name else '전체'}' 구역의 파일 목록 조회를 시작합니다...")
         if not getattr(self, "_storage_available", False):
             print("GCS 클라이언트가 비활성화되어 목록을 가져올 수 없습니다.")
             return []
         try:
-            blobs = self.storage_client.list_blobs(self.bucket_name, prefix=folder_name)
-            
-            blob_list = list(blobs)
+            prefixes: list[str | None]
+            if folder_name:
+                normalized = self._normalize_blob_name(folder_name)
+                prefixes = [folder_name]
+                if normalized and normalized != folder_name:
+                    prefixes.append(normalized)
+            else:
+                prefixes = [None]
+
+            seen: set[str] = set()
+            blob_list: list = []
+            for prefix in prefixes:
+                kwargs = {"prefix": prefix} if prefix else {}
+                blobs = self.storage_client.list_blobs(self.bucket_name, **kwargs)
+                for blob in blobs:
+                    if blob.name in seen:
+                        continue
+                    seen.add(blob.name)
+                    blob_list.append(blob)
 
             if sort_by_time and blob_list:
                 blob_list.sort(key=lambda blob: blob.time_created, reverse=True)
@@ -102,13 +122,16 @@ class GCSManager:
             return []
 
     def upload_file(self, source_file, destination_blob_name, *, encoding: str = "utf-8", content_type: str | None = None):
-        print(f"파일 업로드 시작: '{destination_blob_name}'")
+        normalized_name = self._normalize_blob_name(destination_blob_name)
+        if not normalized_name:
+            normalized_name = destination_blob_name
+        print(f"파일 업로드 시작: '{normalized_name}'")
         if not getattr(self, "_storage_available", False):
             print("GCS 클라이언트가 비활성화되어 업로드를 수행할 수 없습니다.")
             return False
         try:
             bucket = self.storage_client.bucket(self.bucket_name)
-            blob = bucket.blob(destination_blob_name)
+            blob = bucket.blob(normalized_name)
 
             if isinstance(source_file, str):
                 payload = source_file.encode(encoding)
@@ -127,6 +150,10 @@ class GCSManager:
 
             upload_kwargs = {"content_type": content_type} if content_type else {}
             blob.upload_from_string(payload, **upload_kwargs)
+            try:
+                blob.reload()
+            except Exception:
+                pass
 
             print("파일 업로드 성공!")
             return True
@@ -144,15 +171,51 @@ class GCSManager:
             return None
         try:
             bucket = self.storage_client.bucket(self.bucket_name)
-            blob = bucket.blob(blob_name)
+            candidate_names = [blob_name]
+            normalized = self._normalize_blob_name(blob_name)
+            if normalized and normalized != blob_name:
+                candidate_names.append(normalized)
 
-            content = blob.download_as_text()
-
-            print("파일 읽기 성공!")
-            return content
+            for name in candidate_names:
+                try:
+                    blob = bucket.blob(name)
+                    content = blob.download_as_text()
+                    print("파일 읽기 성공!")
+                    return content
+                except Exception:
+                    continue
+            print("파일 읽기 중 심각한 에러 발생: 지정된 경로에서 파일을 찾을 수 없습니다.")
+            return None
         except Exception as e:
             print(f"파일 읽기 중 심각한 에러 발생: {e}")
             return None
+
+    def ensure_folder(self, folder_name: str) -> bool:
+        if not folder_name:
+            return True
+        if not getattr(self, "_storage_available", False):
+            print("GCS 클라이언트가 비활성화되어 폴더를 생성할 수 없습니다.")
+            return False
+        normalized = self._normalize_blob_name(folder_name)
+        if not normalized:
+            normalized = folder_name
+        normalized = normalized if normalized.endswith("/") else f"{normalized}/"
+        try:
+            bucket = self.storage_client.bucket(self.bucket_name)
+            blob = bucket.blob(normalized)
+            if blob.exists():
+                return True
+            alt_name = folder_name if folder_name.endswith("/") else f"{folder_name}/"
+            if alt_name != normalized:
+                alt_blob = bucket.blob(alt_name)
+                if alt_blob.exists():
+                    return True
+            blob.upload_from_string(b"", content_type="application/x-empty")
+            print(f"폴더 플레이스홀더 생성 완료: '{normalized}'")
+            return True
+        except Exception as e:
+            print(f"폴더 생성 중 에러 발생: {e}")
+            return False
 
 class BQManager:
     _dataset_checked = False
@@ -335,27 +398,40 @@ class BQManager:
             print(f"Failed to load dataframe: {e}")
             return False
 
+    def create_external_table(self):
+        if not self.bq_client:
+            print("BigQuery 클라이언트가 비활성화되어 테이블을 생성하지 않습니다.")
+            return False
+        
+        query = """
+        CREATE OR REPLACE EXTERNAL TABLE `sayouzone-ai.stocks_bronze.fundamentals_fnguide_bronze`
+        (
+          company_id STRING,
+          product_name STRING,
+          event_timestamp TIMESTAMP,
+          year INT64,
+          quater INT64
+        )
+        OPTIONS (
+          format = 'CSV',
+          uris = ['gs://sayouzone-ai-stocks/Fundamentals/FnGuide/year=*/quarter=*/*.csv'],
+          hive_partitioning_mode = 'AUTO',
+          hive_partitioning_source_uri_prefix = 'gs://sayouzone-ai-stocks/Fundamentals/FnGuide/',
+          require_partition_filter = TRUE
+        );
+        """
+        
+        try:
+            print("Executing query to create external table...")
+            self.bq_client.query(query).result()
+            print("External table created successfully.")
+            return True
+        except Exception as e:
+            print(f"Failed to create external table: {e}")
+            return False
+
 
 if __name__ == "__main__":
-    # GCSManager 사용 예시
-    gcs_manager = GCSManager(bucket_name="sayouzone-ai-stocks")
-    gcs_manager.upload_file("test.txt", "test/test.txt")
-    files = gcs_manager.list_files("test/")
-    print(files)
-    content = gcs_manager.read_file("test/test.txt")
-    print(content)
-
     # BQManager 사용 예시
     bq_manager = BQManager()
-    
-    # 샘플 데이터프레임 생성
-    data = {'col1': [1, 2], 'col2': ['A', 'B']}
-    df = pd.DataFrame(data)
-    
-    # 데이터프레임을 BigQuery에 로드
-    bq_manager.load_dataframe(df, 'my_test_table', if_exists='replace')
-    
-    # BigQuery에서 테이블 쿼리
-    queried_df = bq_manager.query_table('my_test_table')
-    if queried_df is not None:
-        print(queried_df)
+    bq_manager.create_external_table()

@@ -71,7 +71,11 @@ async def get_fundamentals_data(site: str, stock: str):
             if agent_state_raw:
                 try:
                     final_state = json.loads(agent_state_raw)
-                    result = service_module.fundamentals(stock=identifier)
+                    result = service_module.fundamentals(
+                        stock=identifier,
+                        use_cache=True,
+                        overwrite=False,
+                    )
                     analysis_payload = final_state.get("analysis_result", final_state)
                     rating_payload = final_state.get("rating")
                     response_payload = {
@@ -96,7 +100,11 @@ async def get_fundamentals_data(site: str, stock: str):
                     pass
 
             service_module: fnguide.Fundamentals
-            result = service_module.fundamentals(stock=identifier)
+            result = service_module.fundamentals(
+                stock=identifier,
+                use_cache=True,
+                overwrite=False,
+            )
 
             final_response, final_state_json, rating = await fundamentals_agent.call_agent_async(user_input_ticker=identifier)
 
@@ -132,7 +140,11 @@ async def get_fundamentals_data(site: str, stock: str):
 
             return response_payload
         else:
-            return service_module.fundamentals(stock=identifier)
+            return service_module.fundamentals(
+                stock=identifier,
+                use_cache=True,
+                overwrite=False,
+            )
     except HTTPException:
         raise
     except Exception as e:

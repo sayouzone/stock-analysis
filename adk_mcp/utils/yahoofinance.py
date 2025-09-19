@@ -359,25 +359,67 @@ class Fundamentals:
             print("업로드할 데이터프레임이 비어 있어 업로드를 건너뜁니다.")
             return
 
-        folder_name = self._build_folder_path(ticker_symbol)
-        existing_files = set(self.gcs_manager.list_files(folder_name=folder_name))
-        file_name = f"{folder_name}{attribute_name}.csv"
+        now = datetime.now()
+        quarter = ((now.month - 1) // 3) + 1
+        safe_ticker = re.sub(r"[^0-9A-Za-z_-]", "_", ticker_symbol)
 
-        if file_name in existing_files:
-            print(f"'{file_name}' 파일이 이미 존재하여 업로드를 건너뜁니다.")
+        folder_name = self._build_folder_path(year=now.year, quarter=quarter)
+        legacy_folder = self._legacy_folder_from_components(
+            year=now.year,
+            quarter=quarter,
+            safe_ticker=safe_ticker,
+        )
+
+        existing_files: set[str] = set()
+        for blob_name in self.gcs_manager.list_files(folder_name=folder_name):
+            existing_files.add(blob_name)
+            existing_files.add(blob_name.lstrip("/"))
+        if legacy_folder:
+            for blob_name in self.gcs_manager.list_files(folder_name=legacy_folder):
+                existing_files.add(blob_name)
+                existing_files.add(blob_name.lstrip("/"))
+
+        new_blob = f"{folder_name}{safe_ticker}_{attribute_name}.csv"
+        normalized_new_blob = new_blob.lstrip("/")
+        use_normalized = normalized_new_blob and normalized_new_blob != new_blob
+
+        new_candidates = [new_blob]
+        if use_normalized:
+            new_candidates.append(normalized_new_blob)
+
+        if any(candidate in existing_files for candidate in new_candidates):
+            print(f"'{new_candidates[-1]}' 파일이 이미 존재하여 업로드를 건너뜁니다.")
             return
 
         csv_payload = data_table.to_csv()
-        self.gcs_manager.upload_file(
+        self.gcs_manager.ensure_folder(folder_name)
+
+        target_blob_name = normalized_new_blob if use_normalized else new_blob
+        uploaded = self.gcs_manager.upload_file(
             source_file=csv_payload,
-            destination_blob_name=file_name,
+            destination_blob_name=target_blob_name,
             encoding="utf-8",
             content_type="text/csv; charset=utf-8",
         )
+        if uploaded:
+            existing_files.update({target_blob_name, target_blob_name.lstrip("/")})
+            existing_files.add(f"/{target_blob_name}".replace("//", "/"))
 
-    def _build_folder_path(self, ticker_symbol: str) -> str:
-        """Build the Yahoo Finance fundamentals folder path for the provided ticker."""
-        now = datetime.now()
-        current_quarter = f"{now.year}-Q{((now.month - 1) // 3) + 1}"
-        safe_ticker = re.sub(r"[^0-9A-Za-z_-]", "_", ticker_symbol)
-        return f"/Fundamentals/YahooFinance/{safe_ticker}/{current_quarter}/"
+    def _build_folder_path(self, *, year: int, quarter: int) -> str:
+        """Build the Yahoo Finance fundamentals folder path for the provided date partition."""
+        year_partition = f"year={year}"
+        quarter_partition = f"quarter={quarter}"
+        return (
+            f"Fundamentals/YahooFinance/{year_partition}/"
+            f"{quarter_partition}/"
+        )
+
+    def _legacy_folder_from_components(
+        self,
+        *,
+        year: int,
+        quarter: int,
+        safe_ticker: str,
+    ) -> str:
+        legacy_quarter = f"{year}-Q{quarter}"
+        return f"/Fundamentals/YahooFinance/{safe_ticker}/{legacy_quarter}/"
