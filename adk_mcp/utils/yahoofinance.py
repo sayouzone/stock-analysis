@@ -14,7 +14,12 @@ class News:
     def __init__(self):
         self.bq_manager = BQManager()
 
-    async def news_collect(self, query: str, max_articles: int = 100, period: str = "7") -> AsyncGenerator[Dict[str, Any], None]:
+    async def news_collect(
+        self,
+        query: str,
+        max_articles: int = 100,
+        period: str = "7",
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         회사 이름(query)을 받아서 티커로 변환한 뒤,
         Yahoo Finance에서 뉴스를 수집하고, 기사 본문을 크롤링한 후
@@ -370,10 +375,20 @@ class Fundamentals:
             safe_ticker=safe_ticker,
         )
 
+        misspelled_folder = (
+            folder_name.replace("quarter=", "quater=")
+            if "quarter=" in folder_name
+            else None
+        )
+
         existing_files: set[str] = set()
         for blob_name in self.gcs_manager.list_files(folder_name=folder_name):
             existing_files.add(blob_name)
             existing_files.add(blob_name.lstrip("/"))
+        if misspelled_folder:
+            for blob_name in self.gcs_manager.list_files(folder_name=misspelled_folder):
+                existing_files.add(blob_name)
+                existing_files.add(blob_name.lstrip("/"))
         if legacy_folder:
             for blob_name in self.gcs_manager.list_files(folder_name=legacy_folder):
                 existing_files.add(blob_name)

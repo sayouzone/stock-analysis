@@ -410,7 +410,7 @@ class BQManager:
           product_name STRING,
           event_timestamp TIMESTAMP,
           year INT64,
-          quater INT64
+          quarter INT64
         )
         OPTIONS (
           format = 'CSV',

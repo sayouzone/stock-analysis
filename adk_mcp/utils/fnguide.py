@@ -2,8 +2,10 @@ import requests
 import pandas as pd
 import json
 from io import StringIO
-from .gcpmanager import GCSManager
 from datetime import date
+
+from utils.companydict import companydict
+from .gcpmanager import GCSManager
 
 class Fundamentals:
     TABLE_MAP = [
@@ -23,6 +25,7 @@ class Fundamentals:
         self.stock = stock
         self.url = f"https://comp.fnguide.com/SVO2/ASP/SVD_main.asp?pGB=1&gicode=A{stock}"
         self.gcs = GCSManager(bucket_name="sayouzone-ai-stocks")
+        self._translator = _FnGuideTranslator()
 
     def fundamentals(
         self,
@@ -45,6 +48,7 @@ class Fundamentals:
         )
         file_base = self.stock
 
+        misspelled_folder = self._partition_alias(folder_name)
         legacy_folder = self._legacy_folder_from_current(
             folder_name, stock=self.stock, year=today.year, quarter=quarter
         )
@@ -53,7 +57,9 @@ class Fundamentals:
 
         if use_cache:
             existing_files = self._collect_existing_files(
-                folder_name, legacy_folder
+                folder_name,
+                misspelled_folder,
+                legacy_folder,
             )
             cached_data = self._load_from_gcs(
                 folder_name,
@@ -66,7 +72,9 @@ class Fundamentals:
 
         if existing_files is None and not overwrite:
             existing_files = self._collect_existing_files(
-                folder_name, legacy_folder
+                folder_name,
+                misspelled_folder,
+                legacy_folder,
             )
 
         response = requests.get(self.url)
@@ -76,7 +84,12 @@ class Fundamentals:
         datasets = {}
         for name, index in self.TABLE_MAP:
             if index < len(tables):
-                datasets[name] = tables[index]
+                frame = tables[index]
+                frame = self._translator.translate_dataframe(
+                    frame,
+                    stock_code=self.stock,
+                )
+                datasets[name] = frame
             else:
                 print(f"경고: '{name}'에 해당하는 테이블(index {index})을 찾지 못해 빈 데이터로 저장합니다.")
                 datasets[name] = pd.DataFrame()
@@ -106,7 +119,12 @@ class Fundamentals:
         legacy_folder: str | None,
     ) -> dict[str, list[dict]] | None:
         if existing_files is None:
-            existing_files = self._collect_existing_files(folder_name, legacy_folder)
+            alias_folder = self._partition_alias(folder_name)
+            existing_files = self._collect_existing_files(
+                folder_name,
+                alias_folder,
+                legacy_folder,
+            )
 
         cached_data: dict[str, list[dict]] = {}
         for name, _ in self.TABLE_MAP:
@@ -164,9 +182,11 @@ class Fundamentals:
             )
 
         if existing_files is None:
+            alias_folder = self._partition_alias(folder_name) if not overwrite else None
             collect_legacy = legacy_folder if not overwrite else None
             existing_files = self._collect_existing_files(
                 folder_name,
+                alias_folder,
                 collect_legacy,
             )
 
@@ -203,10 +223,14 @@ class Fundamentals:
     def _collect_existing_files(
         self,
         primary_folder: str,
-        legacy_folder: str | None,
+        *additional_folders: str | None,
     ) -> dict[str, str]:
         mapping: dict[str, str] = {}
-        for candidate_folder in filter(None, [primary_folder, legacy_folder]):
+        seen_folders: set[str] = set()
+        for candidate_folder in (primary_folder, *additional_folders):
+            if not candidate_folder or candidate_folder in seen_folders:
+                continue
+            seen_folders.add(candidate_folder)
             for blob_name in self.gcs.list_files(folder_name=candidate_folder):
                 mapping.setdefault(blob_name, blob_name)
                 normalized = blob_name.lstrip("/")
@@ -270,9 +294,94 @@ class Fundamentals:
         if parts[0] != "Fundamentals" or parts[1] != "FnGuide":
             return None
         year_part, quarter_part = parts[2], parts[3]
-        if not year_part.startswith("year=") or not quarter_part.startswith("quarter="):
+        if not year_part.startswith("year=") or not (
+            quarter_part.startswith("quarter=")
+            or quarter_part.startswith("quater=")
+        ):
             return None
         year_value = str(year if year is not None else year_part.split("=", 1)[1])
         quarter_value = str(quarter if quarter is not None else quarter_part.split("=", 1)[1])
         legacy_quarter = f"{year_value}-Q{quarter_value}"
         return f"/Fundamentals/FnGuide/{stock}/{legacy_quarter}/raw/"
+
+    def _partition_alias(self, folder_name: str) -> str | None:
+        if "quarter=" not in folder_name:
+            return None
+        return folder_name.replace("quarter=", "quater=")
+
+
+class _FnGuideTranslator:
+    """Map known Korean column labels to English equivalents."""
+
+    _COLUMN_MAP = {
+        "잠정실적발표예정일": "tentative_results_announcement_date",
+        "예상실적(영업이익, 억원)": "expected_operating_profit_billion_krw",
+        "3개월전예상실적대비(%)": "expected_operating_profit_vs_3m_pct",
+        "전년동기대비(%)": "year_over_year_pct",
+        "운용사명": "asset_manager_name",
+        "보유수량": "shares_held",
+        "시가평가액": "market_value_krw",
+        "상장주식수내비중": "share_of_outstanding_shares_pct",
+        "운용사내비중": "manager_portfolio_ratio_pct",
+        "항목": "item",
+        "보통주": "common_shares",
+        "지분율": "ownership_ratio_pct",
+        "최종변동일": "last_change_date",
+        "주주구분": "shareholder_category",
+        "대표주주수": "major_shareholder_count",
+        "투자의견": "investment_opinion",
+        "목표주가": "target_price",
+        "추정기관수": "estimate_institution_count",
+        "구분": "category",
+        "코스피 전기·전자": "kospi_electronics",
+        "헤더": "header",
+        "헤더.1": "header_1",
+        "IFRS(연결)": "ifrs_consolidated",
+        "IFRS(별도)": "ifrs_individual",
+    }
+
+    def translate_dataframe(
+        self,
+        frame: pd.DataFrame,
+        *,
+        stock_code: str | None = None,
+    ) -> pd.DataFrame:
+        if frame.empty:
+            return frame
+
+        company_name = None
+        if stock_code:
+            company_name = companydict.get_company_by_code(stock_code)
+            if company_name:
+                company_name = self._normalize(company_name)
+
+        translated = frame.copy()
+
+        if isinstance(translated.columns, pd.MultiIndex):
+            new_columns = []
+            for column in translated.columns:
+                new_columns.append(
+                    tuple(self._translate_token(level, company_name) for level in column)
+                )
+            translated.columns = pd.MultiIndex.from_tuples(
+                new_columns, names=translated.columns.names
+            )
+        else:
+            translated.rename(
+                columns=lambda label: self._translate_token(label, company_name),
+                inplace=True,
+            )
+
+        return translated
+
+    def _translate_token(self, label: str, company_name: str | None) -> str:
+        if not isinstance(label, str):
+            return label
+        normalized = self._normalize(label)
+        if company_name and normalized == company_name:
+            return "company"
+        return self._COLUMN_MAP.get(normalized, normalized)
+
+    @staticmethod
+    def _normalize(value: str) -> str:
+        return value.replace("\xa0", " ").strip()

@@ -8,6 +8,7 @@
 gemini api에 mcp 서버를 연결시킬 경우에는 mcp client를 따로 구성해야 한다는 결론에 도달했다.
 google adk는 따로 client를 구성할 필요 없이 MCPToolset이 따로 있어 클라이언트를 구성할 필요가 없기에 테스트를 고려중이다.
 fnguide 데이터를 저장하기 위해 Cloud Storage - BigQuery 구성하는 과정에서 원문 데이터를 가공하고 업로드 방식을 수정했다.
+BigQuery 데이터 적재를 위해 Cloud Storage에 로우 데이터를 저장하는 로직을 수정했다.
 ## 배포
 
 ## 테스트
