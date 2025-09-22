@@ -3,10 +3,15 @@ FROM node:20-slim AS frontend-builder
 
 WORKDIR /app/frontend
 
-# Copy package.json first for better caching
-COPY frontend/package.json ./
+# Copy package.json and package-lock.json first for better caching
+COPY frontend/package.json frontend/package-lock.json ./
 RUN npm install
-COPY frontend/ ./
+
+# Copy the rest of the frontend code
+COPY frontend/ .
+
+# Manually run svelte-kit sync to generate necessary files
+RUN npx svelte-kit sync
 
 # 💡 1. --build-arg "VITE_API_URL=..." 로 전달된 값을 받기 위해 ARG 선언
 ARG VITE_API_URL
@@ -33,6 +38,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY main.py .
 COPY routers/ ./routers/
 COPY utils/ ./utils/
+COPY stock_agent/ ./stock_agent/
 
 # Copy frontend build from previous stage
 COPY --from=frontend-builder /app/frontend/build ./frontend/build/
