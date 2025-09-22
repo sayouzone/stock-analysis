@@ -1,7 +1,7 @@
 import os
 import json
 from copy import deepcopy
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import logging
@@ -20,24 +20,170 @@ from google.adk.events import Event
 from google.adk.utils.context_utils import Aclosing
 from pydantic import BaseModel, Field
 
-from stock_agent.fundamentals_agent.tools import fundamentals_mcp_tool
+from stock_agent.fundamentals_agent.tools import (
+    fundamentals_mcp_tool,
+    hybrid_web_search,
+    brave_raw_search,
+    WEB_SEARCH_TOOL_AVAILABLE,
+)
 from stock_agent.fundamentals_agent.prompt import fetch_fundamentals_data_instructions
-from google.adk.tools import google_search
 from google.adk.tools.set_model_response_tool import SetModelResponseTool
-from tavily import TavilyClient
 from utils.gcpmanager import GCSManager
 
 full_instruction = fetch_fundamentals_data_instructions()
+
+FUNDAMENTALS_FETCHER_GUIDANCE = """
+추가 지침:
+- 티커와 도구를 활용해 기업이 상장된 국가를 가능한 한 정확히 파악하십시오.
+- 숫자만 이루어진 한국 종목 코드(예: 005930, 000660 등)는 기본적으로 한국(KR) 상장으로 간주할 수 있습니다.
+- 해외 티커의 경우 제공된 Brave/Exa 하이브리드 웹 검색 도구를 활용해 상장 시장과 국가를 근거와 함께 확인하십시오. 확신할 수 있는 ISO 2자리 국가 코드를 사용하세요(예: "US", "JP", "HK").
+- 상장 국가를 확정할 수 없다면 FundamentalsData.country 필드를 "Unknown"으로 설정하고 이유를 남기십시오.
+"""
+
+fundamentals_fetcher_instruction = f"{full_instruction}\n\n{FUNDAMENTALS_FETCHER_GUIDANCE}" if full_instruction else FUNDAMENTALS_FETCHER_GUIDANCE
+
+# --- Runtime configuration (tunable via environment variables) ---
+FAST_MODE = os.getenv("FUNDAMENTALS_AGENT_FAST_MODE", "true").lower() == "true"
+DEFAULT_THINKING_MODEL = "gemini-2.5-flash" if FAST_MODE else "gemini-2.5-pro"
+THINKING_MODEL = os.getenv("FUNDAMENTALS_THINKING_MODEL", DEFAULT_THINKING_MODEL)
+
+
+def _supports_thinking(model_name: str) -> bool:
+    overridden = os.getenv("FUNDAMENTALS_FORCE_THINKING")
+    if overridden:
+        return overridden.lower() in {"1", "true", "yes", "on"}
+    name = model_name.lower()
+    if "flash" in name and "thinking" not in name:
+        return False
+    return True
+
+
+SUPPORTS_THINKING = _supports_thinking(THINKING_MODEL)
+
+if FAST_MODE:
+    DEFAULT_ANALYST_BUDGET = "256"
+    DEFAULT_REVIEWER_BUDGET = "192"
+    DEFAULT_REVISER_BUDGET = "192"
+    DEFAULT_RATER_BUDGET = "128"
+    DEFAULT_REVIEW_LOOPS = "0"
+else:
+    DEFAULT_ANALYST_BUDGET = "1024"
+    DEFAULT_REVIEWER_BUDGET = "512"
+    DEFAULT_REVISER_BUDGET = "512"
+    DEFAULT_RATER_BUDGET = "512"
+    DEFAULT_REVIEW_LOOPS = "3"
+
+if SUPPORTS_THINKING:
+    ANALYST_THINKING_BUDGET = int(os.getenv("FUNDAMENTALS_ANALYST_THINKING_BUDGET", DEFAULT_ANALYST_BUDGET))
+    REVIEWER_THINKING_BUDGET = int(os.getenv("FUNDAMENTALS_REVIEWER_THINKING_BUDGET", DEFAULT_REVIEWER_BUDGET))
+    REVISER_THINKING_BUDGET = int(os.getenv("FUNDAMENTALS_REVISER_THINKING_BUDGET", DEFAULT_REVISER_BUDGET))
+    RATER_THINKING_BUDGET = int(os.getenv("FUNDAMENTALS_RATER_THINKING_BUDGET", DEFAULT_RATER_BUDGET))
+else:
+    ANALYST_THINKING_BUDGET = 0
+    REVIEWER_THINKING_BUDGET = 0
+    REVISER_THINKING_BUDGET = 0
+    RATER_THINKING_BUDGET = 0
+
+REVIEW_LOOP_MAX_ITERATIONS = int(os.getenv("FUNDAMENTALS_REVIEW_MAX_ITERATIONS", DEFAULT_REVIEW_LOOPS))
 
 # --- Constants ---
 APP_NAME = "fundamentals_analysis_app"
 USER_ID = "12345"
 SESSION_ID = "123344"
-THINKING_MODEL = "gemini-2.5-pro"
 
 # --- Configure Logging ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _strip_none(data: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in data.items() if value is not None}
+
+
+def _upload_json_payload(
+    gcs_manager: GCSManager,
+    *,
+    blob_name: str,
+    payload: dict[str, Any],
+) -> bool:
+    try:
+        serialized = json.dumps(payload, ensure_ascii=False, default=str)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("Failed to serialize payload for %s: %s", blob_name, exc)
+        return False
+
+    return gcs_manager.upload_file(
+        source_file=serialized,
+        destination_blob_name=blob_name,
+        encoding="utf-8",
+        content_type="application/json; charset=utf-8",
+    )
+
+
+
+
+
+def _fallback_fundamentals_data(ticker: str, message: str) -> dict[str, str]:
+    fallback_message = (message[:480] + "…") if len(message) > 480 else message
+    return {
+        "ticker": ticker or "",
+        "country": "Unknown",
+        "balance_sheet": fallback_message,
+        "income_statement": fallback_message,
+        "cash_flow": fallback_message,
+        "profitability": fallback_message,
+        "stability": fallback_message,
+        "growth": fallback_message,
+        "economic_moat": fallback_message,
+        "management_capability": fallback_message,
+        "industry_macro_environment": fallback_message,
+    }
+
+
+def _normalize_fundamentals_payload(value: Any, *, ticker: str) -> dict[str, Any]:
+    if value is None:
+        return _fallback_fundamentals_data(ticker, "펀더멘털 데이터를 생성하지 못했습니다.")
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return _fallback_fundamentals_data(ticker, value)
+        if not isinstance(parsed, dict):
+            return _fallback_fundamentals_data(ticker, str(parsed))
+        value = parsed
+    if isinstance(value, (list, tuple, set)):
+        return _fallback_fundamentals_data(ticker, str(list(value)))
+    if not isinstance(value, dict):
+        return _fallback_fundamentals_data(ticker, str(value))
+
+    merged: dict[str, Any] = {**value}
+    merged["ticker"] = ticker or str(merged.get("ticker", ""))
+    merged.setdefault("country", "Unknown")
+
+    defaults = _fallback_fundamentals_data(merged["ticker"], "데이터가 제공되지 않았습니다.")
+    for key, fallback in defaults.items():
+        if key == "ticker":
+            continue
+        if not merged.get(key):
+            merged[key] = fallback
+        elif not isinstance(merged[key], str):
+            merged[key] = str(merged[key])
+    return merged
+
+
+
+def _make_planner(thinking_budget: int | None) -> BuiltInPlanner | None:
+    if not SUPPORTS_THINKING:
+        return None
+    if not thinking_budget or thinking_budget <= 0:
+        return None
+    return BuiltInPlanner(
+        thinking_config=types.ThinkingConfig(
+            include_thoughts=True,
+            thinking_budget=thinking_budget,
+        ),
+    )
+
 
 class FundamentalsData(BaseModel):
     ticker: str = Field(description="The stock ticker symbol of the company.")
@@ -114,172 +260,6 @@ async def run_json_formatter_callback(
 
     return formatted_content
 
-def tavily_search(
-    query: str,
-    topic: Literal["general", "news", "finance"] = "general",
-    search_depth: Literal["basic", "advanced"] = "basic",
-    max_results: int = 5,
-    include_answer: Literal["none", "basic", "advanced"] = "basic",
-    raw_content: Literal["none", "markdown", "text"] = "none",
-    include_images: bool = False,
-    include_image_descriptions: bool = False,
-    # 시간/범위 필터 (SDK가 제공하는 옵션)
-    days: Optional[int] = None,                 # topic="news"일 때만 의미 있음
-    time_range: Optional[Literal["day", "week", "month", "year", "d", "w", "m", "y"]] = None,
-    start_date: Optional[str] = None,           # YYYY-MM-DD
-    end_date: Optional[str] = None,             # YYYY-MM-DD
-    # 도메인 화이트/블랙리스트
-    include_domains: Optional[List[str]] = None,
-    exclude_domains: Optional[List[str]] = None,
-    country: Optional[str] = None,              # topic="general"에서 우선순위 부스팅
-    timeout: int = 60,
-) -> Dict[str, Any]:
-    """
-    Tavily Search API를 호출하는 ADK Function Tool.
-    ADK는 이 함수 시그니처/도크스트링을 읽어 자동으로 Tool 스키마를 생성해요.
-
-    Args:
-        query: 질의문(필수).
-        topic: "general" | "news" | "finance".
-        search_depth: "basic" | "advanced".
-        max_results: 0~20.
-        include_answer: "none" | "basic" | "advanced".
-        raw_content: "none" | "markdown" | "text".
-        include_images: 이미지 URL 포함 여부.
-        include_image_descriptions: 이미지 설명 포함 여부.
-        days/time_range/start_date/end_date: 신선도/기간 필터(뉴스에 유용).
-        include_domains/exclude_domains: 도메인 필터링.
-        country: 특정 국가 우선순위(일반 검색 전용).
-        timeout: 요청 타임아웃(초).
-
-    Returns:
-        dict: {status, query, answer?, results, images?, request_id, tips?}
-              - results: [{title, url, score, published_date?, snippet}]
-    """
-    api_key = os.getenv("TAVILY_API_KEY")
-    if not api_key:
-        return {
-            "status": "error",
-            "error_message": "환경변수 TAVILY_API_KEY가 설정되어 있지 않습니다.",
-            "tip": "export TAVILY_API_KEY='tvly-***' 형태로 설정하세요.",
-        }
-
-    client = TavilyClient(api_key=api_key)
-
-    params: Dict[str, Any] = {
-        "query": query,
-        "topic": topic,
-        "search_depth": search_depth,
-        "max_results": max_results,
-        "include_answer": include_answer if include_answer != "none" else False,
-        "include_raw_content": False if raw_content == "none" else raw_content,
-        "include_images": include_images,
-        "include_image_descriptions": include_image_descriptions,
-        "timeout": timeout,
-    }
-
-    if include_domains:
-        params["include_domains"] = include_domains
-    if exclude_domains:
-        params["exclude_domains"] = exclude_domains
-    if country:
-        params["country"] = country
-
-    if days is not None:
-        params["days"] = days
-    if time_range is not None:
-        params["time_range"] = time_range
-    if start_date is not None:
-        params["start_date"] = start_date
-    if end_date is not None:
-        params["end_date"] = end_date
-
-    try:
-        resp: Dict[str, Any] = client.search(**params)
-    except Exception as e:
-        return {"status": "error", "error_message": f"Tavily 호출 실패: {e!s}"}
-
-    # 결과 축약/정돈(LLM이 쓰기 쉬운 형태)
-    results = []
-    for r in resp.get("results", []):
-        results.append(
-            {
-                "title": r.get("title"),
-                "url": r.get("url"),
-                "score": r.get("score"),
-                "published_date": r.get("published_date"),
-                "snippet": (r.get("content") or "")[:500],
-            }
-        )
-
-    out: Dict[str, Any] = {
-        "status": "success",
-        "query": resp.get("query", query),
-        "results": results,
-        "request_id": resp.get("request_id"),
-    }
-    if "answer" in resp:
-        out["answer"] = resp["answer"]
-    if "images" in resp:
-        out["images"] = resp["images"]
-
-    # 사용 팁(뉴스일 때 days/time_range 권장 등)
-    tips = []
-    if topic == "news" and days is None and time_range is None and (start_date is None and end_date is None):
-        tips.append("속보성 검색이면 days=1~7 또는 time_range='week'를 고려하세요.")
-    if search_depth == "basic":
-        tips.append("정밀도가 필요하면 search_depth='advanced'를 사용하세요.")
-    if tips:
-        out["tips"] = tips
-
-    return out
-
-def tavily_extract(
-    urls: List[str],
-    extract_depth: Literal["basic", "advanced"] = "basic",
-    format: Literal["markdown", "text"] = "markdown",
-    include_images: bool = False,
-    timeout: Optional[float] = None,
-) -> Dict[str, Any]:
-    """
-    Tavily Extract API로 URL 본문을 구조화해서 추출하는 도구.
-
-    Args:
-        urls: 단일 URL 또는 URL 리스트(최대 20개).
-        extract_depth: "basic"|"advanced" (advanced가 더 풍부하지만 느릴 수 있음).
-        format: "markdown"|"text".
-        include_images: 이미지 URL 포함 여부.
-        timeout: 초 단위 타임아웃(없으면 기본값).
-
-    Returns:
-        dict: {status, results, failed_results, request_id}
-              - results: [{url, raw_content, images?, favicon?}]
-    """
-    api_key = os.getenv("TAVILY_API_KEY")
-    if not api_key:
-        return {
-            "status": "error",
-            "error_message": "환경변수 TAVILY_API_KEY가 설정되어 있지 않습니다.",
-        }
-
-    if isinstance(urls, str):  # allow single URL inputs gracefully
-        urls = [urls]
-
-    client = TavilyClient(api_key=api_key)
-
-    try:
-        resp = client.extract(
-            urls=urls,
-            extract_depth=extract_depth,
-            format=format,
-            include_images=include_images,
-            timeout=timeout,
-        )
-    except Exception as e:
-        return {"status": "error", "error_message": f"Tavily Extract 호출 실패: {e!s}"}
-
-    return {"status": "success", **resp}
-
 class FundamentalsAnalysisAgent(BaseAgent):
     """
     Custom agent for a company fundamentals analysis and refinement workflow.
@@ -287,7 +267,6 @@ class FundamentalsAnalysisAgent(BaseAgent):
     This agent orchestrates a sequence of LLM agents to company fundamentals analysis, 
     review it, revise it, and output for json.
     """
-    country_finder: LlmAgent
     fundamentals_fetcher: LlmAgent
     analyst: LlmAgent
     reviewer: LlmAgent
@@ -302,7 +281,6 @@ class FundamentalsAnalysisAgent(BaseAgent):
     def __init__(
             self,
             name: str,
-            country_finder: LlmAgent,
             fundamentals_fetcher: LlmAgent,
             analyst: LlmAgent,
             reviewer: LlmAgent,
@@ -324,11 +302,12 @@ class FundamentalsAnalysisAgent(BaseAgent):
 
         # Create internal agents *before* calling super().__init__
         loop_agent = LoopAgent(
-            name="ReviewerReviserLoop", sub_agents=[reviewer, reviser], max_iterations=3
+            name="ReviewerReviserLoop",
+            sub_agents=[reviewer, reviser],
+            max_iterations=REVIEW_LOOP_MAX_ITERATIONS,
         )
 
         sub_agents_list = [
-            country_finder,
             fundamentals_fetcher,
             analyst,
             loop_agent,
@@ -338,7 +317,6 @@ class FundamentalsAnalysisAgent(BaseAgent):
 
         super().__init__(
             name=name,
-            country_finder=country_finder,
             fundamentals_fetcher=fundamentals_fetcher,
             analyst=analyst,
             reviewer=reviewer,
@@ -359,20 +337,6 @@ class FundamentalsAnalysisAgent(BaseAgent):
         """
         logger.info(f"[{self.name}]")
 
-        # 1. Initial Country Finding
-        logger.info(f"[{self.name}] Running CountryFinder...")
-        async for event in self.country_finder.run_async(ctx):
-            logger.info(f"[{self.name}] Event from CountryFinder: {event.model_dump_json(indent=2, exclude_none=True)}")
-            yield event
-        
-        # Check if analysis result before proceeding
-        if "stock_country" not in ctx.session.state or not ctx.session.state["stock_country"]:
-            logger.warning(f"[{self.name}] No stock_country found in context after CountryFinder. Exiting.")
-            return
-
-        logger.info(f"[{self.name}]")
-
-        # 2. Fetch Fundamentals Data
         logger.info(f"[{self.name}] Running FundamentalsFetcher...")
         async for event in self.fundamentals_fetcher.run_async(ctx):
             logger.info(f"[{self.name}] Event from FundamentalsFetcher: {event.model_dump_json(indent=2, exclude_none=True)}")
@@ -383,9 +347,15 @@ class FundamentalsAnalysisAgent(BaseAgent):
             logger.warning(f"[{self.name}] No fundamentals_data found in context after FundamentalsFetcher. Exiting.")
             return
 
+        ticker_value = str(ctx.session.state.get("ticker", ""))
+        ctx.session.state["fundamentals_data"] = _normalize_fundamentals_payload(
+            ctx.session.state.get("fundamentals_data"),
+            ticker=ticker_value,
+        )
+
         logger.info(f"[{self.name}]")
 
-        # 3. Initial Analysis
+        # 2. Initial Analysis
         logger.info(f"[{self.name}] Running Analyst...")
         async for event in self.analyst.run_async(ctx):
             logger.info(f"[{self.name}] Event from Analyst: {event.model_dump_json(indent=2, exclude_none=True)}")
@@ -398,15 +368,18 @@ class FundamentalsAnalysisAgent(BaseAgent):
         
         logger.info(f"[{self.name}]")
 
-        # 4. Review and Revise Loop
-        logger.info(f"[{self.name}] Running ReviewerReviserLoop...")
-        async for event in self.loop_agent.run_async(ctx):
-            logger.info(f"[{self.name}] Event from ReviewerReviserLoop: {event.model_dump_json(indent=2, exclude_none=True)}")
-            yield event
-        
+        # 3. Review and Revise Loop (optional)
+        if self.loop_agent.max_iterations > 0:
+            logger.info(f"[{self.name}] Running ReviewerReviserLoop (max_iterations={self.loop_agent.max_iterations})...")
+            async for event in self.loop_agent.run_async(ctx):
+                logger.info(f"[{self.name}] Event from ReviewerReviserLoop: {event.model_dump_json(indent=2, exclude_none=True)}")
+                yield event
+        else:
+            logger.info(f"[{self.name}] Skipping ReviewerReviserLoop (fast mode).")
+
         logger.info(f"[{self.name}]")
 
-        # 5. Rating for finalcial analysis quality
+        # 4. Rating for finalcial analysis quality
         logger.info(f"[{self.name}] Running Rater...")
         async for event in self.rater.run_async(ctx):
             logger.info(f"[{self.name}] Event from Rater: {event.model_dump_json(indent=2, exclude_none=True)}")
@@ -414,26 +387,9 @@ class FundamentalsAnalysisAgent(BaseAgent):
         
         logger.info(f"[{self.name}] Completed all steps.")
 
-country_finder = LlmAgent(
-    model = "gemini-2.5-flash",
-    name = "CountryFinder",
-    instruction="""
-    You are an expert in stock markets and ticker symbols. 
-    Your task is to identify the country associated with a given stock ticker symbol from a user's query. 
-    Prefer reasoning from prior knowledge; only make at most a single search call when absolutely necessary.
-    Use the provided tool to look up the ticker symbol in a google search and return the corresponding country. 
-    If the ticker symbol is not found, respond with 'Unknown'.
-    Example:
-    User Query: "PSTG"
-    Response: "United States"
-
-    User Query: "005930"
-    Response: "Korea"
-    """,
-    description="Determines which country's stock the ticker symbol corresponds to in the user's query.",
-    tools=[google_search],
-    output_key="stock_country"
-)
+_FETCHER_TOOLS: List[Any] = [fundamentals_mcp_tool]
+if WEB_SEARCH_TOOL_AVAILABLE:
+    _FETCHER_TOOLS.extend([hybrid_web_search, brave_raw_search])
 
 fundamentals_fetcher = LlmAgent(
     model = "gemini-2.5-flash",
@@ -441,22 +397,16 @@ fundamentals_fetcher = LlmAgent(
     description="""
     Fetches comprehensive fundamentals data for a specified stock ticker and country.
     """,
-    instruction=full_instruction,
-    output_schema=FundamentalsData,
+    instruction=fundamentals_fetcher_instruction,
     output_key="fundamentals_data",
-    tools=[fundamentals_mcp_tool, tavily_search, tavily_extract],
+    tools=_FETCHER_TOOLS,
     disallow_transfer_to_parent=True,
     disallow_transfer_to_peers=True
 )
 
 analyst = LlmAgent(
     model=THINKING_MODEL,
-    planner=BuiltInPlanner(
-        thinking_config=types.ThinkingConfig(
-            include_thoughts=True,
-            thinking_budget=1024,
-        ),
-    ),
+    planner=_make_planner(ANALYST_THINKING_BUDGET),
     name="Analyst",
     tools=[SetModelResponseTool(AnalysisResult)],
     instruction="""
@@ -504,12 +454,7 @@ analyst = LlmAgent(
 
 reviewer = LlmAgent(
     model=THINKING_MODEL,
-    planner=BuiltInPlanner(
-        thinking_config=types.ThinkingConfig(
-            include_thoughts=True,
-            thinking_budget=512,
-        ),
-    ),
+    planner=_make_planner(REVIEWER_THINKING_BUDGET),
     name="Reviewer",
     instruction="""
     You are a meticulous financial analyst.
@@ -526,12 +471,7 @@ reviewer = LlmAgent(
 
 reviser = LlmAgent(
     model=THINKING_MODEL,
-    planner=BuiltInPlanner(
-        thinking_config=types.ThinkingConfig(
-            include_thoughts=True,
-            thinking_budget=512,
-        ),
-    ),
+    planner=_make_planner(REVISER_THINKING_BUDGET),
     name="Reviser",
     instruction="""
     You are a skilled financial analyst.
@@ -549,6 +489,7 @@ reviser = LlmAgent(
 
 rater = LlmAgent(
     model=THINKING_MODEL,
+    planner=_make_planner(RATER_THINKING_BUDGET),
     name="Rater",
     instruction="""
     You are an expert financial analyst.
@@ -577,7 +518,6 @@ rater = LlmAgent(
 
 fundamentals_analysis_agent = FundamentalsAnalysisAgent(
     name="FundamentalsAnalysisAgent",
-    country_finder=country_finder,
     fundamentals_fetcher=fundamentals_fetcher,
     analyst=analyst,
     reviewer=reviewer,
@@ -630,10 +570,16 @@ async def call_agent_async(user_input_ticker: str):
     events = runner.run_async(user_id=USER_ID, session_id=SESSION_ID, new_message=content)
 
     final_response = "No final response captured."
-    async for event in events:
-        if event.is_final_response() and event.content and event.content.parts:
-            logger.info(f"Potential final response from [{event.author}]: {event.content.parts[0].text}")
-            final_response = event.content.parts[0].text
+    run_error: str | None = None
+
+    try:
+        async for event in events:
+            if event.is_final_response() and event.content and event.content.parts:
+                logger.info(f"Potential final response from [{event.author}]: {event.content.parts[0].text}")
+                final_response = event.content.parts[0].text
+    except Exception as exc:  # pragma: no cover - defensive logging
+        run_error = str(exc)
+        logger.error("Agent run failed due to an unexpected error: %s", exc, exc_info=True)
 
     print("\n--- Agent Interaction Result ---")
     print("Agent Final Response: ", final_response)
@@ -643,11 +589,11 @@ async def call_agent_async(user_input_ticker: str):
                                                 session_id=SESSION_ID)
     print("Final Session State:")
     import json
-    session_state = final_session.state
+    session_state = final_session.state if final_session else {}
     if isinstance(session_state, dict):
         final_state = dict(session_state)
     else:
-        final_state = dict(session_state.items())
+        final_state = dict(session_state.items()) if session_state else {}
     def _to_serializable(value):
         if hasattr(value, "model_dump"):
             return _to_serializable(value.model_dump())
@@ -672,16 +618,47 @@ async def call_agent_async(user_input_ticker: str):
         final_state["rating"] = final_rating
     else:
         final_rating = raw_rating
-    final_result = json.dumps(final_state, indent=2, ensure_ascii=False, default=str)
+
+    if run_error and not final_state.get("agent_run_error"):
+        final_state["agent_run_error"] = run_error
+
+    has_error = bool(final_state.get("agent_run_error"))
+
     gcs_bucket_name = os.getenv("GOOGLE_CLOUD_STORAGE_BUCKET")
     gcs_manager = GCSManager(bucket_name=gcs_bucket_name) if gcs_bucket_name else GCSManager()
-    destination_blob = f"Fundamentals/{user_input_ticker}.json"
-    gcs_manager.upload_file(
-        source_file=final_result,
-        destination_blob_name=destination_blob,
-        encoding="utf-8",
-        content_type="application/json; charset=utf-8",
+
+    now = datetime.now(timezone.utc)
+    partition_prefix = f"Fundamentals/year={now.year}/quarter={(now.month - 1)//3 + 1}"
+
+    # Upload full session snapshot (partitioned and legacy path retained for compatibility)
+    if not has_error:
+        partitioned_blob = f"{partition_prefix}/{user_input_ticker}.json"
+        _upload_json_payload(gcs_manager, blob_name=partitioned_blob, payload=final_state)
+        legacy_snapshot_blob = f"Fundamentals/{user_input_ticker}.json"
+        _upload_json_payload(gcs_manager, blob_name=legacy_snapshot_blob, payload=final_state)
+
+    # Upload concise analysis payload to bucket root for downstream consumers
+    analysis_blob = f"{user_input_ticker}_analysis.json"
+    saved_timestamp = now.isoformat().replace("+00:00", "Z")
+    analysis_payload = _strip_none(
+        {
+            "ticker": user_input_ticker,
+            "saved_at": saved_timestamp,
+            "analysis_result": final_state.get("analysis_result"),
+            "rating": final_rating,
+            "agent_final_response": final_state.get("agent_final_response"),
+            "agent_run_error": final_state.get("agent_run_error"),
+        }
     )
+    if not has_error:
+        _upload_json_payload(gcs_manager, blob_name=analysis_blob, payload=analysis_payload)
+
+    # Optional partitioned summary for historical tracking
+    if not has_error:
+        partitioned_analysis_blob = f"{partition_prefix}/{user_input_ticker}_analysis.json"
+        _upload_json_payload(gcs_manager, blob_name=partitioned_analysis_blob, payload=analysis_payload)
+
+    final_result = json.dumps(final_state, indent=2, ensure_ascii=False, default=str)
     print(final_result)
     if final_rating:
         print("\nRating Result:")

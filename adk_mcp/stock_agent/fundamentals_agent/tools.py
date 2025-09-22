@@ -1,6 +1,8 @@
 from google.cloud import bigquery
 import json
 import os
+import logging
+from typing import Any
 
 from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset
 from google.adk.tools.mcp_tool.mcp_session_manager import (
@@ -8,7 +10,10 @@ from google.adk.tools.mcp_tool.mcp_session_manager import (
     StdioServerParameters,
 )
 
+from utils.websearchtool import BraveExaHybridWebToolset
+
 GOOGLE_CLOUD_PROJECT = "sayouzone-ai"
+logger = logging.getLogger(__name__)
 
 def clean_sql_query(text):
     return (
@@ -58,3 +63,26 @@ fundamentals_mcp_tool = MCPToolset(
     ),
     tool_filter=['find_fnguide_data', 'find_yahoofinance_data'],
 )
+
+
+try:
+    _hybrid_toolset = BraveExaHybridWebToolset()
+    WEB_SEARCH_TOOL_AVAILABLE = True
+except Exception as exc:  # pragma: no cover - defensive logging
+    logger.warning("Hybrid web search tool unavailable: %s", exc)
+    _hybrid_toolset = None
+    WEB_SEARCH_TOOL_AVAILABLE = False
+
+
+def hybrid_web_search(**kwargs: Any) -> dict[str, Any]:
+    """Brave+Exa 하이브리드 웹 검색 (도구 호출 시 사용)"""
+    if _hybrid_toolset is None:
+        return {"status": "error", "error": "Hybrid web search tool is not configured."}
+    return _hybrid_toolset.hybrid_web_search(**kwargs)
+
+
+def brave_raw_search(**kwargs: Any) -> dict[str, Any]:
+    """Brave 단일 vertical 생검색 (도구 호출 시 사용)"""
+    if _hybrid_toolset is None:
+        return {"status": "error", "error": "Hybrid web search tool is not configured."}
+    return _hybrid_toolset.brave_raw(**kwargs)

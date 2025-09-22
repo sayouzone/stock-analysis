@@ -4,6 +4,9 @@ import json
 from io import StringIO
 from datetime import date
 
+
+QUARTER_PREFIX = "quarter="
+
 from utils.companydict import companydict
 from .gcpmanager import GCSManager
 
@@ -41,7 +44,7 @@ class Fundamentals:
         today = date.today()
         quarter = (today.month - 1) // 3 + 1
         year_partition = f"year={today.year}"
-        quarter_partition = f"quarter={quarter}"
+        quarter_partition = f"{QUARTER_PREFIX}{quarter}"
         folder_name = (
             f"Fundamentals/FnGuide/{year_partition}/"
             f"{quarter_partition}/"
@@ -295,7 +298,7 @@ class Fundamentals:
             return None
         year_part, quarter_part = parts[2], parts[3]
         if not year_part.startswith("year=") or not (
-            quarter_part.startswith("quarter=")
+            quarter_part.startswith(QUARTER_PREFIX)
             or quarter_part.startswith("quater=")
         ):
             return None
@@ -305,9 +308,9 @@ class Fundamentals:
         return f"/Fundamentals/FnGuide/{stock}/{legacy_quarter}/raw/"
 
     def _partition_alias(self, folder_name: str) -> str | None:
-        if "quarter=" not in folder_name:
+        if QUARTER_PREFIX not in folder_name:
             return None
-        return folder_name.replace("quarter=", "quater=")
+        return folder_name.replace(QUARTER_PREFIX, "quater=")
 
 
 class _FnGuideTranslator:

@@ -12,6 +12,7 @@ langchain-google-genai
 python-dotenv
 pandas
 openpyxl
+pydantic>=2.7,<3
 aiohttp
 asyncio
 httpx
@@ -20,3 +21,4 @@ html5lib
 yfinance
 OpenDartReader
 google-cloud-secret-manager
+readability-lxml

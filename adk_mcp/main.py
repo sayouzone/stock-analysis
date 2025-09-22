@@ -8,9 +8,10 @@ from dotenv import load_dotenv
 if os.getenv("ENVIRONMENT") != "production":
     load_dotenv()
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from routers import news, market, fundamentals
 from utils.gcpmanager import SecretManager
 
@@ -52,15 +53,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# API 라우터를 먼저 등록 (우선순위)
-app.include_router(market.router)
-app.include_router(news.router)
-app.include_router(fundamentals.router)
-
 # 루트 경로에서 헬스체크 엔드포인트 추가
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+app.include_router(market.router)
+app.include_router(news.router)
+app.include_router(fundamentals.router)
 
 _frontend_build = Path(__file__).resolve().parent / "frontend" / "build"
 if _frontend_build.exists():

@@ -1,4 +1,10 @@
+import os
+import json
 import yfinance as yf
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Literal
@@ -39,6 +45,9 @@ class News:
         if not news_list:
             yield {"type": "result", "data": []}
             return
+
+        if max_articles is not None:
+            news_list = news_list[:max_articles]
 
         yield {"type": "progress", "step": "api_call", "status": f"Found {len(news_list)} news articles. Crawling content..."}
 
@@ -161,6 +170,9 @@ class Market:
         if not company:
             raise ValueError("Ticker symbol must be provided.")
 
+        ticker = await asyncio.to_thread(yf.Ticker, company)
+        ticker_info = await asyncio.to_thread(lambda: ticker.info)
+
         # 1. 날짜 설정
         if not end_date:
             end_date = datetime.now().strftime('%Y-%m-%d')
@@ -178,20 +190,18 @@ class Market:
         if cached_df is not None and not cached_df.empty:
             yield {"type": "progress", "step": "cache_hit", "status": f"BigQuery 캐시에서 '{table_id}' 데이터를 사용합니다. API 호출을 건너뜁니다."}
             cached_df['date'] = pd.to_datetime(cached_df['date'])
-            yield {"type": "result", "data": await asyncio.to_thread(self._format_response_from_df, cached_df, company)}
+            yield {"type": "result", "data": await asyncio.to_thread(self._format_response_from_df, cached_df, ticker_info, company)}
             return
 
         # 4. 캐시가 없으면 yfinance에서 데이터 가져오기
         yield {"type": "progress", "step": "api_call", "status": f"BigQuery에 캐시된 데이터가 없거나 부족합니다. '{company}'에 대한 API 호출을 시작합니다."}
-        ticker = await asyncio.to_thread(yf.Ticker, company)
         hist_df = await asyncio.to_thread(lambda: ticker.history(start=start_date, end=end_date))
 
         if hist_df.empty:
-            yield {"type": "result", "data": await asyncio.to_thread(self._format_response_from_df, None, company)}
+            yield {"type": "result", "data": await asyncio.to_thread(self._format_response_from_df, None, ticker_info, company)}
             return
             
         # 5. 가져온 데이터 BigQuery에 저장
-        yield {"type": "progress", "step": "saving", "status": f"총 {len(df_for_bq)}개의 시세 정보를 BigQuery로 로드합니다."}
         df_for_bq = hist_df.copy()
         df_for_bq.reset_index(inplace=True)
         df_for_bq['code'] = company
@@ -210,6 +220,7 @@ class Market:
             df_for_bq[col] = df_for_bq[col].round(4)
         df_for_bq['volume'] = df_for_bq['volume'].astype('int64')
 
+        yield {"type": "progress", "step": "saving", "status": f"총 {len(df_for_bq)}개의 시세 정보를 BigQuery로 로드합니다."}
         await asyncio.to_thread(
             self.bq_manager.load_dataframe,
             df=df_for_bq,
@@ -217,10 +228,7 @@ class Market:
             if_exists="append",
             deduplicate_on=['date', 'code']
         )
-        yield {"type": "result", "data": await asyncio.to_thread(self._format_response_from_df, hist_df, company)}
-
-        # 6. 프론트엔드 응답 준비
-        # BQ에 저장 후, API에서 가져온 데이터를 바로 포맷하여 반환
+        yield {"type": "result", "data": await asyncio.to_thread(self._format_response_from_df, hist_df, ticker_info, company)}
 
     async def market_process(self, company: str) -> AsyncGenerator[Dict[str, Any], None]:
         """
@@ -231,16 +239,14 @@ class Market:
 
         cached_df = await asyncio.to_thread(self.bq_manager.query_table, table_id=table_id, order_by_date=True)
         
-        if cached_df is None or cached_df.empty:
-            yield {"type": "result", "data": {}}
-            return
-        yield {"type": "result", "data": await asyncio.to_thread(self._format_response_from_df, cached_df, company)}
+        ticker_info = await asyncio.to_thread(lambda: yf.Ticker(company).info)
 
-    def _format_response_from_df(self, df: pd.DataFrame, company: str):
+        yield {"type": "result", "data": await asyncio.to_thread(self._format_response_from_df, cached_df, ticker_info, company)}
+
+    def _format_response_from_df(self, df: pd.DataFrame, ticker_info: dict, company: str):
         """DataFrame을 받아 프론트엔드 응답 형식으로 변환하는 헬퍼 함수"""
-        ticker = yf.Ticker(company)
-        company_name = ticker.info.get('shortName', company)
-        market_cap = ticker.info.get('marketCap', 0)
+        company_name = ticker_info.get('shortName', company)
+        market_cap = ticker_info.get('marketCap', 0)
 
         if df is None or df.empty:
             print(f"'{company_name}'에 대한 데이터가 없어 빈 응답을 반환합니다.")
@@ -304,137 +310,233 @@ class Market:
         return result
 
 class Fundamentals:
-    def __init__(self):
-        self.bq_manager = BQManager() # Added for consistency, even if not used for caching here
-        self.gcs_manager = GCSManager()
+    CACHE_DIR = "yahoofinance_cache"
 
-    def fundamentals(self, query: str, attribute_name_str: Literal[ # Renamed from 'get' to 'fundamentals' for router compatibility
-        "income_stmt", "quarterly_income_stmt", "ttm_income_stmt", "balance_sheet", "cashflow", "quarterly_cashflow",
-        "ttm_cashflow", "sustainability", "earnings_estimate", "revenue_estimate", "earnings_history", "eps_trend",
-        "eps_revisions", "growth_estimates", "insider_purchases", "insider_transactions", "insider_roster_holders",
-        "major_holders", "institutional_holders", "mutualfund_holders"
-    ]):
-        ticker_symbol = find.get_ticker(query)
-        if not ticker_symbol:
-            raise ValueError(f"'{query}'에 해당하는 티커를 찾을 수 없습니다.")
+    def __init__(self):
+        self.bq_manager = BQManager()
+        self.gcs_manager = GCSManager()
+        os.makedirs(self.CACHE_DIR, exist_ok=True)
+
+    def fundamentals(
+        self,
+        stock: str,
+        *,
+        use_cache: bool = True,
+        overwrite: bool = False,
+    ) -> dict[str, object]:
+        ticker_symbol = find.get_ticker(stock) or stock.upper()
+        cache_file = os.path.join(self.CACHE_DIR, f"{ticker_symbol}.json")
+
+        if use_cache and not overwrite and os.path.isfile(cache_file):
+            try:
+                # 먼저 캐시 파일 열기를 시도
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    logging.info(f"Returning cached data for {ticker_symbol} from {cache_file}")
+                    return json.load(f)
+            # 파일 읽기 또는 JSON 파싱 실패 시 (손상된 경우)
+            except (IOError, json.JSONDecodeError) as e:
+                print(f"Cache read failed for {ticker_symbol}: {e}. Deleting corrupted cache file.")
+                try:
+                    # 손상된 캐시 파일 삭제 시도
+                    os.remove(cache_file)
+                    print(f"Deleted corrupted cache file: {cache_file}")
+                except Exception as delete_error:
+                    # 파일 삭제 실패 시 오류 메시지 출력
+                    print(f"Failed to delete corrupted cache file {cache_file}: {delete_error}")
 
         ticker = yf.Ticker(ticker_symbol)
-        print(f"\n'{attribute_name_str}' 속성을 동적으로 가져옵니다...")
+
         try:
-            data_attribute = getattr(ticker, attribute_name_str, None)
+            info = ticker.info or {}
+        except Exception:
+            info = {}
+        try:
+            fast_info = ticker.fast_info or {}
+        except Exception:
+            fast_info = {}
 
-            if data_attribute is None:
-                print(f"오류: '{attribute_name_str}' 속성을 찾을 수 없습니다.")
-                return None
+        def _get(*keys, src=None):
+            src = src or info
+            for key in keys:
+                if key in src and src[key] not in (None, ''):
+                    return src[key]
+            return None
 
-            print(f"'{attribute_name_str}' 속성 가져오기 완료.")
-            print(f"  - 타입: {type(data_attribute)}")
-            if isinstance(data_attribute, pd.DataFrame):
-                print("  - 데이터 미리보기 (상위 3줄):")
-                print(data_attribute.head(3))
-            elif isinstance(data_attribute, dict):
-                print("  - 데이터 미리보기 (일부 키):")
-                for i, (key, value) in enumerate(data_attribute.items()):
-                    if i >= 3:
-                        break
-                    print(f"    {key}: {value}")
-            else:
-                print(f"  - 데이터: {data_attribute}")
+        price = _get('last_price', src=fast_info) or _get('regularMarketPrice')
+        change = _get('regularMarketChange')
+        change_pct = _get('regularMarketChangePercent')
+        volume = _get('last_volume', src=fast_info) or _get('regularMarketVolume')
+        currency = _get('currency', src=fast_info) or _get('currency') or ''
+        market_cap = _get('market_cap', src=fast_info) or _get('marketCap')
+        trailing_pe = _get('trailingPE')
+        forward_pe = _get('forwardPE')
+        roe = _get('returnOnEquity')
+        beta = _get('beta')
+        dividend_yield_raw = _get('dividendYield')
+        dividend_yield = None
+        if isinstance(dividend_yield_raw, (int, float)):
+            dividend_yield = dividend_yield_raw * 100 if dividend_yield_raw < 1 else dividend_yield_raw
+        sector = _get('sector')
+        industry = _get('industry')
+        country = _get('country')
+        summary = _get('longBusinessSummary')
+        fifty_two_high = _get('fiftyTwoWeekHigh')
+        fifty_two_low = _get('fiftyTwoWeekLow')
 
-            if isinstance(data_attribute, (pd.DataFrame, pd.Series)):
-                self._upload_table_to_gcs(
-                    ticker_symbol=ticker_symbol,
-                    attribute_name=attribute_name_str,
-                    data_table=data_attribute,
-                )
+        def fmt_signed(value):
+            if value is None:
+                return '-'
+            try:
+                return f"{value:+.2f}"
+            except Exception:
+                return str(value)
 
-            return data_attribute
+        def fmt_percent(value):
+            if value is None:
+                return '-'
+            try:
+                return f"{value:.2f}%"
+            except Exception:
+                return str(value)
 
-        except Exception as e:
-            print(f"예상치 못한 오류 발생: {e}")
-        return None
+        def fmt_number(value):
+            if value is None:
+                return '-'
+            try:
+                return f"{value:,}"
+            except Exception:
+                return str(value)
 
-    def _upload_table_to_gcs(self, *, ticker_symbol: str, attribute_name: str, data_table: pd.DataFrame | pd.Series):
-        """Upload DataFrame/Series fundamentals data to GCS following FnGuide naming rules."""
-        if getattr(self.gcs_manager, "_storage_available", False) is False:
-            print("GCS 클라이언트가 비활성화되어 업로드를 건너뜁니다.")
-            return
+        def fmt_market_cap(value):
+            if value is None:
+                return '-'
+            try:
+                if value >= 1e12:
+                    return f"{value/1e12:.2f} 조"
+                if value >= 1e9:
+                    return f"{value/1e9:.2f} 십억"
+                if value >= 1e6:
+                    return f"{value/1e6:.2f} 백만"
+                return f"{value:,}"
+            except Exception:
+                return str(value)
 
-        if isinstance(data_table, pd.DataFrame) and data_table.empty:
-            print("업로드할 데이터프레임이 비어 있어 업로드를 건너뜁니다.")
-            return
+        market_conditions = [
+            {
+                '0': '종가/ 전일대비/ 수익률',
+                '1': f"{fmt_number(price)} / {fmt_signed(change)} / {fmt_percent(change_pct)}",
+                '2': '거래량',
+                '3': fmt_number(volume)
+            },
+            {
+                '0': f'시가총액({currency})',
+                '1': fmt_market_cap(market_cap),
+                '2': 'PER / 선행 PER',
+                '3': f"{trailing_pe or '-'} / {forward_pe or '-'}"
+            },
+            {
+                '0': '배당수익률',
+                '1': fmt_percent(dividend_yield),
+                '2': '베타(1년)',
+                '3': beta if beta is not None else '-'
+            }
+        ]
+        if fifty_two_high or fifty_two_low:
+            market_conditions.append({
+                '0': '52주.최고가/ 최저가',
+                '1': f"{fmt_number(fifty_two_high)} / {fmt_number(fifty_two_low)}",
+                '2': '',
+                '3': ''
+            })
 
-        now = datetime.now()
-        quarter = ((now.month - 1) // 3) + 1
-        safe_ticker = re.sub(r"[^0-9A-Za-z_-]", "_", ticker_symbol)
+        industry_comparison = []
+        if trailing_pe is not None or forward_pe is not None:
+            industry_comparison.append({'category': 'PER', 'company': trailing_pe, 'kospi_electronics': forward_pe, 'KOSPI': None})
+        if roe is not None:
+            industry_comparison.append({'category': 'ROE', 'company': roe * 100 if roe < 1 else roe, 'kospi_electronics': None, 'KOSPI': None})
+        if dividend_yield is not None:
+            industry_comparison.append({'category': '배당수익률', 'company': dividend_yield, 'kospi_electronics': None, 'KOSPI': None})
+        if beta is not None:
+            industry_comparison.append({'category': '베타(1년)', 'company': beta, 'kospi_electronics': None, 'KOSPI': 1})
 
-        folder_name = self._build_folder_path(year=now.year, quarter=quarter)
-        legacy_folder = self._legacy_folder_from_components(
-            year=now.year,
-            quarter=quarter,
-            safe_ticker=safe_ticker,
-        )
+        analysis_lines = []
+        if sector or industry:
+            analysis_lines.append(f"• 섹터/산업: {sector or '-'} / {industry or '-'}")
+        if country:
+            analysis_lines.append(f"• 상장 국가: {country}")
+        if market_cap:
+            analysis_lines.append(f"• 시가총액: {fmt_market_cap(market_cap)} {currency}")
+        if trailing_pe:
+            analysis_lines.append(f"• PER: {trailing_pe}")
+        if dividend_yield is not None:
+            analysis_lines.append(f"• 배당수익률: {dividend_yield:.2f}%")
+        if summary:
+            analysis_lines.append('\n' + summary)
+        analysis_text = ''.join(analysis_lines) if analysis_lines else '분석 요약을 생성할 수 없습니다.'
 
-        misspelled_folder = (
-            folder_name.replace("quarter=", "quater=")
-            if "quarter=" in folder_name
-            else None
-        )
+        score = 70
+        if isinstance(trailing_pe, (int, float)) and trailing_pe < 15:
+            score += 5
+        if isinstance(dividend_yield, (int, float)) and dividend_yield > 2:
+            score += 5
+        if isinstance(beta, (int, float)) and beta < 1:
+            score += 3
+        if isinstance(forward_pe, (int, float)) and forward_pe < 12:
+            score += 4
+        score = max(55, min(95, int(round(score))))
+        if score >= 85:
+            rate = 'excellent'
+        elif score >= 70:
+            rate = 'good'
+        elif score >= 60:
+            rate = 'normal'
+        else:
+            rate = 'warning'
+        rating = {
+            'score': score,
+            'rate': rate,
+            'justification': '기본 지표(시가총액, 수익성, 배당 등)를 기반으로 산출한 단순 스코어입니다.'
+        }
 
-        existing_files: set[str] = set()
-        for blob_name in self.gcs_manager.list_files(folder_name=folder_name):
-            existing_files.add(blob_name)
-            existing_files.add(blob_name.lstrip("/"))
-        if misspelled_folder:
-            for blob_name in self.gcs_manager.list_files(folder_name=misspelled_folder):
-                existing_files.add(blob_name)
-                existing_files.add(blob_name.lstrip("/"))
-        if legacy_folder:
-            for blob_name in self.gcs_manager.list_files(folder_name=legacy_folder):
-                existing_files.add(blob_name)
-                existing_files.add(blob_name.lstrip("/"))
+        result = {
+            'market_conditions': market_conditions,
+            'earning_issue': [],
+            'holdings_status': [],
+            'governance': [],
+            'shareholders': [],
+            'bond_rating': [],
+            'analysis': [],
+            'industry_comparison': industry_comparison,
+            'financialhighlight_annual': [],
+            'financialhighlight_netquarter': []
+        }
 
-        new_blob = f"{folder_name}{safe_ticker}_{attribute_name}.csv"
-        normalized_new_blob = new_blob.lstrip("/")
-        use_normalized = normalized_new_blob and normalized_new_blob != new_blob
+        session_state = {
+            'ticker': ticker_symbol,
+            'currency': currency,
+            'source': 'yahoofinance',
+            'raw_snapshot': {
+                'marketCap': market_cap,
+                'pe': trailing_pe,
+                'forwardPE': forward_pe,
+                'dividendYield': dividend_yield,
+                'beta': beta,
+                'volume': volume,
+            }
+        }
 
-        new_candidates = [new_blob]
-        if use_normalized:
-            new_candidates.append(normalized_new_blob)
+        final_data = {
+            'result': result,
+            'analysis': analysis_text,
+            'rating': rating,
+            'session_state': session_state,
+            'agent_final_response': None,
+        }
 
-        if any(candidate in existing_files for candidate in new_candidates):
-            print(f"'{new_candidates[-1]}' 파일이 이미 존재하여 업로드를 건너뜁니다.")
-            return
+        try:
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(final_data, f, ensure_ascii=False, indent=4)
+        except IOError as e:
+            print(f"Cache write failed for {ticker_symbol}: {e}")
 
-        csv_payload = data_table.to_csv()
-        self.gcs_manager.ensure_folder(folder_name)
-
-        target_blob_name = normalized_new_blob if use_normalized else new_blob
-        uploaded = self.gcs_manager.upload_file(
-            source_file=csv_payload,
-            destination_blob_name=target_blob_name,
-            encoding="utf-8",
-            content_type="text/csv; charset=utf-8",
-        )
-        if uploaded:
-            existing_files.update({target_blob_name, target_blob_name.lstrip("/")})
-            existing_files.add(f"/{target_blob_name}".replace("//", "/"))
-
-    def _build_folder_path(self, *, year: int, quarter: int) -> str:
-        """Build the Yahoo Finance fundamentals folder path for the provided date partition."""
-        year_partition = f"year={year}"
-        quarter_partition = f"quarter={quarter}"
-        return (
-            f"Fundamentals/YahooFinance/{year_partition}/"
-            f"{quarter_partition}/"
-        )
-
-    def _legacy_folder_from_components(
-        self,
-        *,
-        year: int,
-        quarter: int,
-        safe_ticker: str,
-    ) -> str:
-        legacy_quarter = f"{year}-Q{quarter}"
-        return f"/Fundamentals/YahooFinance/{safe_ticker}/{legacy_quarter}/"
+        return final_data
