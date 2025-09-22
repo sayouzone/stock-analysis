@@ -8,10 +8,10 @@ from dotenv import load_dotenv
 if os.getenv("ENVIRONMENT") != "production":
     load_dotenv()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from routers import news, market, fundamentals
 from utils.gcpmanager import SecretManager
 
@@ -63,7 +63,13 @@ app.include_router(news.router)
 app.include_router(fundamentals.router)
 
 _frontend_build = Path(__file__).resolve().parent / "frontend" / "build"
-if _frontend_build.exists():
-    app.mount("/", StaticFiles(directory=str(_frontend_build), html=True), name="static")
+if _frontend_build.exists() and (_frontend_build / "index.html").exists():
+    
+    @app.exception_handler(404)
+    async def not_found_exception_handler(request: Request, exc: HTTPException):
+        return FileResponse(str(_frontend_build / "index.html"))
+
+    app.mount("/", StaticFiles(directory=str(_frontend_build)), name="static")
+    
 else:
     logging.warning("Frontend build directory not found at %s; static hosting disabled.", _frontend_build)

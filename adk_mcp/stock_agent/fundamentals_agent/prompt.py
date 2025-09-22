@@ -20,12 +20,11 @@ INLINE_FALLBACK = (
 
 
 def fetch_fundamentals_data_instructions():
-    """펀더멘털 분석 지침을 GCS 또는 로컬 파일에서 로드한다.
+    """펀더멘털 분석 지침을 GCS에서 로드한다.
 
     - 환경 변수 `PROMPT_BLOB`에 참조 경로(디렉터리)를 지정한다.
-    - 우선 GCS 버킷에서 `fetch_fundamentals_data.md`를 시도하고, 이용 불가 시
-      동일 경로의 로컬 파일을 읽는다.
-    - 두 경로 모두 실패하면 최소한의 기본 지침(INLINE_FALLBACK)을 반환한다.
+    - GCS 버킷에서 `fetch_fundamentals_data.md`를 로드한다.
+    - 실패하면 최소한의 기본 지침(INLINE_FALLBACK)을 반환한다.
     """
 
     blob_root = os.getenv("PROMPT_BLOB")
@@ -44,19 +43,6 @@ def fetch_fundamentals_data_instructions():
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("GCS 지침 파일 로딩 중 오류 발생 (%s): %s", blob_path, exc)
 
-    if not payload:
-        local_path = blob_path if blob_path.is_absolute() else PROJECT_ROOT / blob_path
-        if local_path.exists():
-            try:
-                payload = local_path.read_text(encoding="utf-8")
-                if payload.strip():
-                    logger.info("펀더멘털 지침을 로컬 파일에서 불러왔습니다: %s", local_path)
-                    return payload
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.error("로컬 지침 파일을 읽는 중 오류 발생 (%s): %s", local_path, exc)
-        else:
-            logger.warning("로컬 경로에 지침 파일이 없습니다: %s", local_path)
-
     if payload and payload.strip():
         # stock_country 같은 누락 컨텍스트 변수로 인한 템플릿 오류 방지
         try:
@@ -69,5 +55,5 @@ def fetch_fundamentals_data_instructions():
         logger.info("펀더멘털 지침을 GCS에서 성공적으로 불러왔습니다: %s", blob_path)
         return sanitized
 
-    logger.error("GCS 지침 파일이 비어있거나 존재하지 않습니다: %s", blob_path)
+    logger.error("GCS에서 지침 파일을 찾을 수 없거나 비어있습니다: %s", blob_path)
     return INLINE_FALLBACK

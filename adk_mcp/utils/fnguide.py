@@ -112,6 +112,12 @@ class Fundamentals:
             legacy_folder=legacy_folder,
         )
 
+        record_payloads['session_state'] = {
+            'ticker': self.stock,
+            'currency': 'KRW',
+            'source': 'fnguide'
+        }
+
         return record_payloads
 
     def _load_from_gcs(

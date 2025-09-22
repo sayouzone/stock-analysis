@@ -22,7 +22,8 @@ SERVICE_MAP = {
 }
 
 _GCS_BUCKET = os.getenv("GOOGLE_CLOUD_STORAGE_BUCKET")
-_FNGUIDE_CACHE_PREFIX = "Fundamentals/cache"
+_RESPONSE_CACHE_PREFIX = "Fundamentals/cache/response"
+_AGENT_STATE_CACHE_PREFIX = "Fundamentals/cache/agent_state"
 _JSON_CONTENT_TYPE = "application/json; charset=utf-8"
 
 
@@ -44,7 +45,7 @@ def _sanitize_for_json(value):
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     if isinstance(value, dict):
-        return {key: _sanitize_for_json(item) for key, item in value.items()}
+        return {str(key): _sanitize_for_json(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_sanitize_for_json(item) for item in value]
     if isinstance(value, tuple):
@@ -93,12 +94,12 @@ async def get_fundamentals_data(site: str, stock: str, nocache: bool = False):
         if current_site == "fnguide":
             gcs_manager = _get_gcs_manager()
             year, quarter = _current_year_and_quarter()
-            cache_prefix = f"{_FNGUIDE_CACHE_PREFIX}/year={year}/quarter={quarter}"
+            cache_prefix = f"{_RESPONSE_CACHE_PREFIX}/year={year}/quarter={quarter}"
             cache_blob = f"{cache_prefix}/{identifier}.json"
             if not nocache:
                 cached_payload = gcs_manager.read_file(cache_blob)
                 if not cached_payload:
-                    legacy_cache_blob = f"{_FNGUIDE_CACHE_PREFIX}/{identifier}.json"
+                    legacy_cache_blob = f"{_RESPONSE_CACHE_PREFIX}/{identifier}.json"
                     cached_payload = gcs_manager.read_file(legacy_cache_blob)
                 if cached_payload:
                     try:
@@ -109,10 +110,10 @@ async def get_fundamentals_data(site: str, stock: str, nocache: bool = False):
                         pass
 
             if not nocache:
-                agent_state_blob = f"Fundamentals/year={year}/quarter={quarter}/{identifier}.json"
+                agent_state_blob = f"{_AGENT_STATE_CACHE_PREFIX}/year={year}/quarter={quarter}/{identifier}.json"
                 agent_state_raw = gcs_manager.read_file(agent_state_blob)
                 if not agent_state_raw:
-                    legacy_state_blob = f"Fundamentals/{identifier}.json"
+                    legacy_state_blob = f"{_AGENT_STATE_CACHE_PREFIX}/{identifier}.json"
                     agent_state_raw = gcs_manager.read_file(legacy_state_blob)
                 if agent_state_raw:
                     try:
@@ -145,7 +146,7 @@ async def get_fundamentals_data(site: str, stock: str, nocache: bool = False):
                                 encoding="utf-8",
                                 content_type=_JSON_CONTENT_TYPE,
                             )
-                            legacy_cache_blob = f"{_FNGUIDE_CACHE_PREFIX}/{identifier}.json"
+                            legacy_cache_blob = f"{_RESPONSE_CACHE_PREFIX}/{identifier}.json"
                             gcs_manager.upload_file(
                                 source_file=payload_json,
                                 destination_blob_name=legacy_cache_blob,
@@ -201,7 +202,7 @@ async def get_fundamentals_data(site: str, stock: str, nocache: bool = False):
                     encoding="utf-8",
                     content_type=_JSON_CONTENT_TYPE,
                 )
-                legacy_cache_blob = f"{_FNGUIDE_CACHE_PREFIX}/{identifier}.json"
+                legacy_cache_blob = f"{_RESPONSE_CACHE_PREFIX}/{identifier}.json"
                 gcs_manager.upload_file(
                     source_file=payload_json,
                     destination_blob_name=legacy_cache_blob,

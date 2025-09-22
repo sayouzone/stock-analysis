@@ -310,39 +310,65 @@ class Market:
         return result
 
 class Fundamentals:
-    CACHE_DIR = "yahoofinance_cache"
+    GCS_CACHE_PREFIX = "yahoofinance_cache"
 
     def __init__(self):
         self.bq_manager = BQManager()
         self.gcs_manager = GCSManager()
-        os.makedirs(self.CACHE_DIR, exist_ok=True)
 
     def fundamentals(
         self,
-        stock: str,
+        stock: str | None = None,
+        query: str | None = None,
         *,
         use_cache: bool = True,
         overwrite: bool = False,
+        attribute_name_str: str | None = None
     ) -> dict[str, object]:
-        ticker_symbol = find.get_ticker(stock) or stock.upper()
-        cache_file = os.path.join(self.CACHE_DIR, f"{ticker_symbol}.json")
+        
+        identifier = stock or query
+        if not identifier:
+            raise ValueError("Must provide either 'stock' or 'query'.")
 
-        if use_cache and not overwrite and os.path.isfile(cache_file):
-            try:
-                # 먼저 캐시 파일 열기를 시도
-                with open(cache_file, 'r', encoding='utf-8') as f:
-                    logging.info(f"Returning cached data for {ticker_symbol} from {cache_file}")
-                    return json.load(f)
-            # 파일 읽기 또는 JSON 파싱 실패 시 (손상된 경우)
-            except (IOError, json.JSONDecodeError) as e:
-                print(f"Cache read failed for {ticker_symbol}: {e}. Deleting corrupted cache file.")
+        ticker_symbol = find.get_ticker(identifier) or identifier.upper()
+
+        # If a specific attribute is requested, bypass the full-summary cache and fetch directly.
+        if attribute_name_str:
+            ticker = yf.Ticker(ticker_symbol)
+            if hasattr(ticker, attribute_name_str):
+                data = getattr(ticker, attribute_name_str)
+                # yfinance can return DataFrames, Series, or dicts. Convert to JSON-serializable format.
+                if isinstance(data, pd.DataFrame):
+                    return json.loads(data.to_json(orient="records", date_format="iso"))
+                if isinstance(data, pd.Series):
+                    return data.to_dict()
+                if isinstance(data, dict):
+                    return data
+                return data # Fallback for other types
+            else:
+                raise ValueError(f"'{attribute_name_str}' is not a valid yfinance Ticker attribute.")
+
+        # --- Logic for full summary ---
+        gcs_blob_name = f"{self.GCS_CACHE_PREFIX}/{ticker_symbol}.json"
+
+        if use_cache and not overwrite:
+            cached_payload = self.gcs_manager.read_file(gcs_blob_name)
+            if cached_payload:
                 try:
-                    # 손상된 캐시 파일 삭제 시도
-                    os.remove(cache_file)
-                    print(f"Deleted corrupted cache file: {cache_file}")
-                except Exception as delete_error:
-                    # 파일 삭제 실패 시 오류 메시지 출력
-                    print(f"Failed to delete corrupted cache file {cache_file}: {delete_error}")
+                    payload = json.loads(cached_payload)
+                    # Check if the cached data has the exchange rate if needed
+                    currency = payload.get('session_state', {}).get('currency')
+                    if currency and currency != 'KRW':
+                        if payload.get('session_state', {}).get('raw_snapshot', {}).get('usdkrw') is None:
+                            logging.info("Cached data is missing exchange rate. Refetching.")
+                        else:
+                            logging.info(f"Returning cached data for {ticker_symbol} from GCS: {gcs_blob_name}")
+                            return payload
+                    else:
+                        logging.info(f"Returning cached data for {ticker_symbol} from GCS: {gcs_blob_name}")
+                        return payload
+                except (json.JSONDecodeError, KeyError) as e:
+                    logging.warning(f"GCS cache read failed for {ticker_symbol} (corrupted/invalid JSON): {e}. Refetching.")
 
         ticker = yf.Ticker(ticker_symbol)
 
@@ -382,6 +408,16 @@ class Fundamentals:
         summary = _get('longBusinessSummary')
         fifty_two_high = _get('fiftyTwoWeekHigh')
         fifty_two_low = _get('fiftyTwoWeekLow')
+
+        usdkrw_rate = None
+        if currency and currency != 'KRW':
+            try:
+                rate_ticker_symbol = f"{currency}KRW=X"
+                rate_ticker = yf.Ticker(rate_ticker_symbol)
+                rate_info = rate_ticker.fast_info or {}
+                usdkrw_rate = rate_info.get('last_price')
+            except Exception as e:
+                logging.warning(f"Could not fetch exchange rate for {rate_ticker_symbol}: {e}")
 
         def fmt_signed(value):
             if value is None:
@@ -522,6 +558,7 @@ class Fundamentals:
                 'dividendYield': dividend_yield,
                 'beta': beta,
                 'volume': volume,
+                'usdkrw': usdkrw_rate
             }
         }
 
@@ -534,9 +571,15 @@ class Fundamentals:
         }
 
         try:
-            with open(cache_file, 'w', encoding='utf-8') as f:
-                json.dump(final_data, f, ensure_ascii=False, indent=4)
-        except IOError as e:
-            print(f"Cache write failed for {ticker_symbol}: {e}")
+            payload_json = json.dumps(final_data, ensure_ascii=False, indent=4)
+            self.gcs_manager.upload_file(
+                source_file=payload_json,
+                destination_blob_name=gcs_blob_name,
+                encoding="utf-8",
+                content_type="application/json; charset=utf-8",
+            )
+            logging.info(f"Successfully cached data for {ticker_symbol} to GCS: {gcs_blob_name}")
+        except Exception as e:
+            logging.error(f"GCS cache write failed for {ticker_symbol}: {e}")
 
         return final_data
