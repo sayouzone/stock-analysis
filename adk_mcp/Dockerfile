@@ -34,6 +34,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# fastmcp가 사용하는 uv 설치
+RUN pip install uv
+
 # Copy backend source code
 COPY main.py .
 COPY routers/ ./routers/
