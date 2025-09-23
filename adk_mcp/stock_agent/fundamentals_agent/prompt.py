@@ -1,12 +1,11 @@
 import logging
 import os
-from pathlib import Path
 import sys
 
 # utils 모듈을 import 할 수 있도록 프로젝트 루트를 python path에 추가한다.
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.append(str(PROJECT_ROOT))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
 
 from utils.gcpmanager import GCSManager
 
@@ -32,14 +31,16 @@ def fetch_fundamentals_data_instructions():
         logger.error("PROMPT_BLOB 환경 변수가 설정되어 있지 않아 지침 파일을 찾을 수 없습니다. 기본 메시지를 사용합니다.")
         return INLINE_FALLBACK
 
-    blob_path = Path(blob_root) / "fetch_fundamentals_data.md"
+    # 환경 변수 값에 포함될 수 있는 불필요한 공백이나 따옴표를 제거하여 경로 오류를 방지합니다.
+    cleaned_blob_root = blob_root.strip().strip('"\'"')
+    blob_path = os.path.join(cleaned_blob_root, "fetch_fundamentals_data.md")
 
     payload: str | None = None
 
     gcs_manager = GCSManager()
     if getattr(gcs_manager, "_storage_available", False):
         try:
-            payload = gcs_manager.read_file(str(blob_path))
+            payload = gcs_manager.read_file(blob_path)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("GCS 지침 파일 로딩 중 오류 발생 (%s): %s", blob_path, exc)
 
