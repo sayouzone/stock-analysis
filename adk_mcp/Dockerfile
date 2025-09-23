@@ -39,6 +39,7 @@ RUN pip install uv
 
 # Copy backend source code
 COPY main.py .
+COPY mcp_server/ ./mcp_server/
 COPY routers/ ./routers/
 COPY utils/ ./utils/
 COPY stock_agent/ ./stock_agent/
