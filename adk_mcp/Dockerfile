@@ -52,9 +52,5 @@ ENV HOST=0.0.0.0
 ENV PORT=8080
 # ENVIRONMENT, GCP_PROJECT_ID 등은 Cloud Run 서비스에서 직접 설정합니다.
 
-# Copy the run script and make it executable
-COPY run.sh .
-RUN chmod +x ./run.sh
-
-# Run the run script
-CMD ["./run.sh"]
+# Run the application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
