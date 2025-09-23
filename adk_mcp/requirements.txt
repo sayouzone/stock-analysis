@@ -19,6 +19,7 @@ httpx
 lxml
 html5lib
 yfinance
+fastmcp
 OpenDartReader
 google-cloud-secret-manager
 readability-lxml

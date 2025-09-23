@@ -3,8 +3,8 @@ FROM node:20-slim AS frontend-builder
 
 WORKDIR /app/frontend
 
-# Copy package.json and package-lock.json first for better caching
-COPY frontend/package.json frontend/package-lock.json ./
+# Copy package.json first for better caching
+COPY frontend/package.json ./
 RUN npm install
 
 # Copy the rest of the frontend code
