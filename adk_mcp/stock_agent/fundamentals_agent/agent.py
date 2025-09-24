@@ -127,6 +127,30 @@ def _upload_json_payload(
         encoding="utf-8",
         content_type="application/json; charset=utf-8",
     )
+def _upload_to_destinations(
+    gcs_manager: GCSManager,
+    *,
+    payload: dict[str, Any],
+    base_filename: str,
+    destinations: List[str],
+) -> None:
+    """
+    주어진 페이로드를 여러 목적지 경로에 업로드합니다.
+    
+    Args:
+        gcs_manager: GCSManager 인스턴스.
+        payload: 업로드할 JSON 데이터 (dict).
+        base_filename: 업로드될 파일의 기본 이름 (예: "005930.json").
+        destinations: 업로드할 경로(prefix)의 리스트. 빈 문자열("")은 버킷 루트를 의미합니다.
+    """
+    for prefix in destinations:
+        # prefix가 있으면 경로를 조합하고, 없으면(버킷 루트) 파일 이름만 사용합니다.
+        blob_name = f"{prefix}/{base_filename}" if prefix else base_filename
+        
+        # 경로 맨 앞에 있을 수 있는 슬래시 제거
+        blob_name = blob_name.lstrip('/')
+
+        _upload_json_payload(gcs_manager, blob_name=blob_name, payload=payload)
 
 
 
@@ -632,6 +656,7 @@ async def call_agent_async(user_input_ticker: str):
     if run_error and not final_state.get("agent_run_error"):
         final_state["agent_run_error"] = run_error
 
+    # Upload full session snapshot (partitioned and legacy path retained for compatibility)
     has_error = bool(final_state.get("agent_run_error"))
 
     gcs_bucket_name = os.getenv("GOOGLE_CLOUD_STORAGE_BUCKET")
@@ -641,33 +666,40 @@ async def call_agent_async(user_input_ticker: str):
     AGENT_STATE_CACHE_PREFIX = "Fundamentals/cache/agent_state"
     partition_prefix = f"{AGENT_STATE_CACHE_PREFIX}/year={now.year}/quarter={(now.month - 1)//3 + 1}"
 
-    # Upload full session snapshot (partitioned and legacy path retained for compatibility)
-    if not has_error:
-        partitioned_blob = f"{partition_prefix}/{user_input_ticker}.json"
-        _upload_json_payload(gcs_manager, blob_name=partitioned_blob, payload=final_state)
-        legacy_snapshot_blob = f"{AGENT_STATE_CACHE_PREFIX}/{user_input_ticker}.json"
-        _upload_json_payload(gcs_manager, blob_name=legacy_snapshot_blob, payload=final_state)
+    # --- ▼▼▼ 기존 업로드 로직을 아래 코드로 대체합니다 ▼▼▼ ---
 
-    # Upload concise analysis payload to bucket root for downstream consumers
-    analysis_blob = f"{user_input_ticker}_analysis.json"
-    saved_timestamp = now.isoformat().replace("+00:00", "Z")
-    analysis_payload = _strip_none(
-        {
-            "ticker": user_input_ticker,
-            "saved_at": saved_timestamp,
-            "analysis_result": final_state.get("analysis_result"),
-            "rating": final_rating,
-            "agent_final_response": final_state.get("agent_final_response"),
-            "agent_run_error": final_state.get("agent_run_error"),
-        }
-    )
     if not has_error:
-        _upload_json_payload(gcs_manager, blob_name=analysis_blob, payload=analysis_payload)
+        # 1. 전체 세션 스냅샷 업로드 (파티션 경로 & 레거시 경로)
+        state_filename = f"{user_input_ticker}.json"
+        state_destinations = [partition_prefix, AGENT_STATE_CACHE_PREFIX]
+        _upload_to_destinations(
+            gcs_manager,
+            payload=final_state,
+            base_filename=state_filename,
+            destinations=state_destinations
+        )
 
-    # Optional partitioned summary for historical tracking
-    if not has_error:
-        partitioned_analysis_blob = f"{partition_prefix}/{user_input_ticker}_analysis.json"
-        _upload_json_payload(gcs_manager, blob_name=partitioned_analysis_blob, payload=analysis_payload)
+        # 2. 간결한 분석 페이로드 업로드 (버킷 루트 & 파티션 경로)
+        analysis_filename = f"{user_input_ticker}_analysis.json"
+        saved_timestamp = now.isoformat().replace("+00:00", "Z")
+        analysis_payload = _strip_none(
+            {
+                "ticker": user_input_ticker,
+                "saved_at": saved_timestamp,
+                "analysis_result": final_state.get("analysis_result"),
+                "rating": final_rating,
+                "agent_final_response": final_state.get("agent_final_response"),
+                "agent_run_error": final_state.get("agent_run_error"),
+            }
+        )
+        # 버킷 루트는 빈 문자열("")로 표현
+        analysis_destinations = ["", partition_prefix]
+        _upload_to_destinations(
+            gcs_manager,
+            payload=analysis_payload,
+            base_filename=analysis_filename,
+            destinations=analysis_destinations
+        )
 
     final_result = json.dumps(final_state, indent=2, ensure_ascii=False, default=str)
     print(final_result)
