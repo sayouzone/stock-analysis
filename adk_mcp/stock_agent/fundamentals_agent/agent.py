@@ -32,6 +32,8 @@ from utils.gcpmanager import GCSManager
 
 full_instruction = fetch_fundamentals_data_instructions()
 
+os.getenv("GOOGLE_API_KEY")
+
 CURRENT_DATE = date.today().isoformat()
 CURRENT_DATE_LINE_KO = f"오늘 날짜는 {CURRENT_DATE}입니다."
 CURRENT_DATE_LINE_EN = f"Today's date is {CURRENT_DATE}."
@@ -125,7 +127,6 @@ def _upload_json_payload(
         encoding="utf-8",
         content_type="application/json; charset=utf-8",
     )
-
 
 
 
@@ -428,7 +429,7 @@ analyst = LlmAgent(
     instruction=(
         f"{CURRENT_DATE_LINE_EN}\n"
         "You are a seasoned financial analyst.\n"
-        "Your task is to analyze the provided: {{fundamentals_data}}.\n"
+        "Your task is to analyze the provided: {{fundamentals_data}}. \n"
         "Deliver a comprehensive analysis covering:\n"
         "- Balance Sheet\n"
         "- Income Statement\n"
@@ -476,7 +477,7 @@ reviewer = LlmAgent(
     instruction=(
         f"{CURRENT_DATE_LINE_EN}\n"
         "You are a meticulous financial analyst.\n"
-        "Your task is to review the provided: {{fundamentals_data}}, {{analysis_result}}.\n"
+        "Your task is to review the provided: {{fundamentals_data}}, {{analysis_result}}. \n"
         "Identify any gaps, inconsistencies, or areas that need further clarification or evidence.\n"
         "Provide constructive feedback and specific suggestions for improvement.\n"
         "\n"
@@ -494,7 +495,7 @@ reviser = LlmAgent(
     instruction=(
         f"{CURRENT_DATE_LINE_EN}\n"
         "You are a skilled financial analyst.\n"
-        "Your task is to revise the provided: {{fundamentals_data}}, {{analysis_result}} based on the review comments: {{review_comments}}.\n"
+        "Your task is to revise the provided: {{fundamentals_data}}, {{analysis_result}} based on the review comments: {{review_comments}}. \n"
         "Address each comment with specific improvements, additional evidence, or clarifications as needed.\n"
         "Ensure the revised analysis is comprehensive, accurate, and well-supported.\n"
         "\n"

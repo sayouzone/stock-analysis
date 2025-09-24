@@ -21,8 +21,8 @@ from google.adk.tools.base_toolset import BaseToolset
 # -----------------------------
 # 설정
 # -----------------------------
-BRAVE_KEY = (os.environ.get("BRAVE_API_KEY") or "").strip()
-EXA_KEY   = (os.environ.get("EXA_API_KEY") or "").strip()
+BRAVE_KEY = os.getenv("BRAVE_API_KEY")
+EXA_KEY   = os.getenv("EXA_API_KEY")
 
 BRAVE_BASE = "https://api.search.brave.com/res/v1"
 BRAVE_ENDPOINTS = {

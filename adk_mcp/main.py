@@ -43,6 +43,7 @@ if os.getenv("ENVIRONMENT") == "production":
     origins.extend([
         "https://*.run.app",
         "https://*.googleusercontent.com",
+        "https://stocks.sayouzone.com"
     ])
 
 app.add_middleware(
