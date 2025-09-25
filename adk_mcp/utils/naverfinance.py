@@ -10,11 +10,46 @@ from datetime import datetime, timedelta
 from io import StringIO
 from urllib import parse
 from typing import Dict, Any, Tuple
+
+NAVER_FINANCE_BASE_URL = 'https://finance.naver.com'
+NAVER_M_STOCK_API_BASE = 'https://m.stock.naver.com/api/stock'
+
+DEFAULT_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36'
 from utils.gcpmanager import BQManager
 from utils.companydict import companydict
 
 HTML_PARSER = 'html.parser'
-NAVER_FINANCE_BASE_URL = 'https://finance.naver.com'
+
+
+def _build_mobile_headers(company_code: str) -> Dict[str, str]:
+    return {
+        'User-Agent': DEFAULT_USER_AGENT,
+        'Accept': 'application/json, text/plain, */*',
+        'Referer': f'https://m.stock.naver.com/domestic/stock/{company_code}',
+    }
+
+
+def _build_summary_headers(company_code: str) -> Dict[str, str]:
+    return {
+        'User-Agent': DEFAULT_USER_AGENT,
+        'Accept': 'application/json, text/plain, */*',
+        'Referer': f'{NAVER_FINANCE_BASE_URL}/item/main.nhn?code={company_code}',
+    }
+
+
+def _infer_currency(nation_code: str | None) -> str | None:
+    if not nation_code:
+        return None
+    nation_code = nation_code.upper()
+    if nation_code in {'KOR', 'KR'}:
+        return 'KRW'
+    if nation_code in {'USA', 'US'}:
+        return 'USD'
+    if nation_code in {'JPN', 'JP'}:
+        return 'JPY'
+    if nation_code in {'CHN', 'CN'}:
+        return 'CNY'
+    return None
 
 class News:
     """Independent Naver news pipeline (no NaverCrawler dependency)."""
@@ -369,6 +404,61 @@ class Market:
         return result
 
 
+async def _fetch_company_metadata(company_code: str) -> Dict[str, Any]:
+    metadata: Dict[str, Any] = {}
+    latest_price: float | None = None
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            basic_resp = await client.get(
+                f"{NAVER_M_STOCK_API_BASE}/{company_code}/basic",
+                headers=_build_mobile_headers(company_code),
+            )
+            basic_resp.raise_for_status()
+            basic_json = basic_resp.json()
+
+            metadata["company_name"] = basic_json.get("stockName")
+
+            exchange_info = basic_json.get("stockExchangeType") or {}
+            metadata["exchange"] = (
+                exchange_info.get("name")
+                or basic_json.get("stockExchangeName")
+            )
+            metadata["currency"] = (
+                _infer_currency(exchange_info.get("nationCode"))
+                or "KRW"
+            )
+
+            closing_price = basic_json.get("closePrice")
+            if closing_price is not None:
+                try:
+                    latest_price = float(str(closing_price).replace(',', ''))
+                except ValueError:
+                    latest_price = None
+        except Exception as exc:
+            metadata.setdefault("_errors", {})["basic"] = str(exc)
+
+        try:
+            summary_resp = await client.get(
+                f"https://api.finance.naver.com/service/itemSummary.naver?itemcode={company_code}",
+                headers=_build_summary_headers(company_code),
+            )
+            summary_resp.raise_for_status()
+            summary_json = summary_resp.json()
+            market_sum = summary_json.get("marketSum")
+            if isinstance(market_sum, (int, float)):
+                market_cap = float(market_sum) * 1_000_000  # marketSum is in million KRW
+                metadata["market_cap"] = market_cap
+                if latest_price and latest_price > 0:
+                    metadata["shares_outstanding"] = int(round(market_cap / latest_price))
+            else:
+                metadata.setdefault("_warnings", []).append("marketSum missing")
+        except Exception as exc:
+            metadata.setdefault("_errors", {})["summary"] = str(exc)
+
+    return metadata
+
+
 async def _find_last_page_number_market(company_code: str, client: httpx.AsyncClient) -> int:
     try:
         url = f"{NAVER_FINANCE_BASE_URL}/item/sise_day.nhn?code={company_code}&page=1"
@@ -468,7 +558,7 @@ async def fetch_market_dataframe(
 
     async with httpx.AsyncClient(
         headers={
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
+            'User-Agent': DEFAULT_USER_AGENT,
             'Accept': "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         },
         follow_redirects=True,
@@ -485,5 +575,22 @@ async def fetch_market_dataframe(
         "sector": None,
         "source": "Naver",
     }
+
+    api_metadata = await _fetch_company_metadata(company_code)
+
+    if api_metadata:
+        for key, value in api_metadata.items():
+            if key in {"_errors", "_warnings"}:
+                continue
+            if value in (None, "", []):
+                continue
+            metadata[key] = value
+
+    if not metadata.get("company_name"):
+        metadata["company_name"] = company
+    if not metadata.get("currency"):
+        metadata["currency"] = "KRW"
+    if not metadata.get("exchange"):
+        metadata["exchange"] = "KRX"
 
     return crawled_df, metadata
