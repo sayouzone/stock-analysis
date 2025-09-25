@@ -9,10 +9,12 @@ import pandas as pd # type: ignore
 from datetime import datetime, timedelta
 from io import StringIO
 from urllib import parse
+from typing import Dict, Any, Tuple
 from utils.gcpmanager import BQManager
 from utils.companydict import companydict
 
 HTML_PARSER = 'html.parser'
+NAVER_FINANCE_BASE_URL = 'https://finance.naver.com'
 
 class News:
     """Independent Naver news pipeline (no NaverCrawler dependency)."""
@@ -365,3 +367,123 @@ class Market:
                 item['date'] = item['date'].strftime('%Y-%m-%d')
 
         return result
+
+
+async def _find_last_page_number_market(company_code: str, client: httpx.AsyncClient) -> int:
+    try:
+        url = f"{NAVER_FINANCE_BASE_URL}/item/sise_day.nhn?code={company_code}&page=1"
+        response = await client.get(url)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, HTML_PARSER)
+        match = None
+        pg_rr_tag = soup.select_one('.pgRR a')
+        if pg_rr_tag:
+            href_value = pg_rr_tag.get('href')
+            if isinstance(href_value, str):
+                match = re.search(r'page=(\\d+)', href_value)
+        if match:
+            last_page_number = int(match.group(1))
+        else:
+            last_page_number = 1
+    except Exception:
+        last_page_number = 1
+    return last_page_number
+
+
+async def _crawl_market_dataframe(
+    company_code: str,
+    start_date: str,
+    end_date: str,
+    client: httpx.AsyncClient,
+) -> pd.DataFrame:
+    last_page = await _find_last_page_number_market(company_code, client)
+
+    full_df = []
+    for page in range(1, last_page + 1):
+        try:
+            url = f"{NAVER_FINANCE_BASE_URL}/item/sise_day.nhn?code={company_code}&page={page}"
+            response = await client.get(url)
+            response.raise_for_status()
+
+            dfs = pd.read_html(StringIO(response.text))
+            df = dfs[0]
+            df.dropna(how='all', inplace=True)
+            if not df.empty:
+                full_df.append(df)
+
+            await asyncio.sleep(random.uniform(0.1, 0.3))
+        except Exception as exc:
+            print(f"Error scraping page {page}: {exc}")
+            continue
+
+    if not full_df:
+        return pd.DataFrame()
+
+    crawled_df = pd.concat(full_df, ignore_index=True)
+    crawled_df.rename(columns={
+        '날짜': 'date',
+        '종가': 'close',
+        '시가': 'open',
+        '고가': 'high',
+        '저가': 'low',
+        '거래량': 'volume'
+    }, inplace=True)
+
+    if '전일비' in crawled_df.columns:
+        crawled_df.drop(columns=['전일비'], inplace=True)
+
+    numeric_cols = ['close', 'open', 'high', 'low', 'volume']
+    for col in numeric_cols:
+        if col in crawled_df.columns:
+            crawled_df[col] = pd.to_numeric(
+                crawled_df[col].astype(str).str.replace(',', '', regex=False),
+                errors='coerce'
+            ).fillna(0)
+            if col == 'volume':
+                crawled_df[col] = crawled_df[col].astype('int64')
+
+    crawled_df['date'] = pd.to_datetime(crawled_df['date'], errors='coerce')
+    crawled_df.dropna(subset=['date'], inplace=True)
+
+    crawled_df = crawled_df[
+        (crawled_df['date'] >= pd.to_datetime(start_date)) &
+        (crawled_df['date'] <= pd.to_datetime(end_date))
+    ]
+
+    return crawled_df
+
+
+async def fetch_market_dataframe(
+    company: str,
+    start_date: str,
+    end_date: str,
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """Fetch Naver Finance market data and metadata for a company code or name."""
+
+    company_code = companydict.get_code(company)
+    if not company_code and company.isdigit():
+        company_code = company
+    if not company_code:
+        raise ValueError(f"Code for {company} not found.")
+
+    async with httpx.AsyncClient(
+        headers={
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
+            'Accept': "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        },
+        follow_redirects=True,
+    ) as client:
+        crawled_df = await _crawl_market_dataframe(company_code, start_date, end_date, client)
+
+    metadata: Dict[str, Any] = {
+        "company_id": companydict.get_ticker(company) or company_code,
+        "company_name": companydict.get_company_by_code(company_code) or company,
+        "exchange": "KRX",
+        "currency": "KRW",
+        "market_cap": None,
+        "shares_outstanding": None,
+        "sector": None,
+        "source": "Naver",
+    }
+
+    return crawled_df, metadata

@@ -7,7 +7,7 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Literal, Tuple
 from utils.companydict import companydict as find
 from utils.gcpmanager import BQManager, GCSManager
 import requests
@@ -583,3 +583,116 @@ class Fundamentals:
             logging.error(f"GCS cache write failed for {ticker_symbol}: {e}")
 
         return final_data
+
+
+async def _collect_ticker_metadata(ticker: yf.Ticker, fallback: Dict[str, Any]) -> Dict[str, Any]:
+    metadata: Dict[str, Any] = dict(fallback)
+
+    symbol = getattr(ticker, "ticker", None) or metadata.get("company_id")
+    metadata["company_id"] = symbol or metadata.get("company_id")
+
+    info: Dict[str, Any] = {}
+    try:
+        info = await asyncio.to_thread(ticker.get_info)
+    except Exception as exc:
+        logging.warning("Failed to fetch ticker info for %s: %s", symbol, exc)
+
+    try:
+        fast_info = await asyncio.to_thread(lambda: ticker.fast_info)
+    except Exception as exc:
+        logging.warning("Failed to fetch fast info for %s: %s", symbol, exc)
+        fast_info = {}
+
+    metadata["company_name"] = (
+        info.get("longName")
+        or info.get("shortName")
+        or metadata.get("company_name")
+        or metadata.get("company_id")
+    )
+    metadata["exchange"] = (
+        info.get("exchange")
+        or info.get("fullExchangeName")
+        or fast_info.get("exchange")
+        or metadata.get("exchange")
+    )
+    metadata["currency"] = (
+        info.get("currency")
+        or fast_info.get("currency")
+        or metadata.get("currency")
+    )
+    metadata["market_cap"] = (
+        info.get("marketCap")
+        or fast_info.get("market_cap")
+        or metadata.get("market_cap")
+    )
+    metadata["shares_outstanding"] = (
+        info.get("sharesOutstanding")
+        or fast_info.get("shares_outstanding")
+        or fast_info.get("shares")
+        or metadata.get("shares_outstanding")
+    )
+    metadata["sector"] = (
+        info.get("sector")
+        or info.get("industry")
+        or metadata.get("sector")
+    )
+
+    if not metadata.get("company_id"):
+        metadata["company_id"] = metadata.get("company_name")
+    if not metadata.get("company_name"):
+        metadata["company_name"] = metadata.get("company_id")
+
+    return metadata
+
+
+async def fetch_market_dataframe(
+    company: str,
+    start_date: str,
+    end_date: str,
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """Fetch raw Yahoo Finance market data and related metadata for a company."""
+
+    ticker_symbol = await asyncio.to_thread(find.get_ticker, company)
+    if not ticker_symbol:
+        ticker_symbol = company
+
+    ticker = await asyncio.to_thread(yf.Ticker, ticker_symbol)
+    hist_df = await asyncio.to_thread(
+        lambda: ticker.history(start=start_date, end=end_date, auto_adjust=False)
+    )
+
+    if hist_df.empty:
+        return pd.DataFrame(), {}
+
+    hist_df.reset_index(inplace=True)
+    hist_df.rename(
+        columns={
+            'Date': 'date',
+            'Open': 'open',
+            'High': 'high',
+            'Low': 'low',
+            'Close': 'close',
+            'Adj Close': 'adj_close',
+            'Volume': 'volume',
+        },
+        inplace=True,
+    )
+
+    company_name = await asyncio.to_thread(find.get_company, company)
+    metadata = await _collect_ticker_metadata(
+        ticker,
+        fallback={
+            "company_id": ticker_symbol,
+            "company_name": company_name or ticker_symbol,
+            "exchange": None,
+            "currency": "USD",
+            "market_cap": None,
+            "shares_outstanding": None,
+            "sector": None,
+            "source": "Yahoo",
+        },
+    )
+
+    metadata.setdefault("source", "Yahoo")
+
+    return hist_df, metadata

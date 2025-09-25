@@ -20,7 +20,7 @@ from google.adk.events import Event
 from google.adk.utils.context_utils import Aclosing
 from pydantic import BaseModel, Field
 
-from stock_agent.fundamentals_agent.tools import (
+from stock_agent.tools import (
     fundamentals_mcp_tool,
     hybrid_web_search,
     brave_raw_search,

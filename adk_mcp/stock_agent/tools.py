@@ -61,7 +61,29 @@ fundamentals_mcp_tool = MCPToolset(
         ),
         timeout=30,
     ),
-    tool_filter=['find_fnguide_data', 'find_yahoofinance_data'],
+    tool_filter=['find_fnguide_data', 'find_yahoofinance_data', 'save_fundamentals_data_to_gcs'],
+)
+
+market_mcp_tool = MCPToolset(
+    connection_params=StdioConnectionParams(
+        server_params=StdioServerParameters(
+            command='fastmcp',
+            args=['run', "mcp_server/market.py:mcp", "--project", "."],
+        ),
+        timeout=30,
+    ),
+    tool_filter=['collect_market_data', 'process_market_data', 'save_market_data_to_gcs'],
+)
+
+gcloud_mcp_tool = MCPToolset(
+    connection_params=StdioConnectionParams(
+        server_params=StdioServerParameters(
+            command='fastmcp',
+            args=['run', "mcp_server/gcloud.py:mcp", "--project", "."],
+        ),
+        timeout=60,  # Increased timeout for potentially long-running cloud operations
+    ),
+    tool_filter=['list_gcs_files', 'read_gcs_file', 'fetch_and_save_market_data_to_bq', 'save_data_to_bq'],
 )
 
 

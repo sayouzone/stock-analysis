@@ -7,8 +7,9 @@ Hybrid Web Search Toolset (Brave + Exa) for Google ADK
 """
 
 from __future__ import annotations
-import os, time, math, json, hashlib
+import os, time, math, json, hashlib, asyncio
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -355,3 +356,199 @@ class BraveExaHybridWebToolset(BaseToolset):
             "results": fused,
             "debug": debug,
         }
+
+
+# -----------------------------
+# Async helpers for MCP or other callers
+# -----------------------------
+@lru_cache(maxsize=1)
+def _get_brave_client_singleton() -> BraveClient:
+    return BraveClient(BRAVE_KEY)
+
+
+@lru_cache(maxsize=1)
+def _get_exa_client_singleton() -> ExaClient:
+    return ExaClient(EXA_KEY)
+
+
+async def brave_search_async(
+    query: str,
+    kind: str = "web",
+    count: int = 10,
+    country: str = "kr",
+    lang: str = "ko",
+    safesearch: str = "moderate",
+    extra_params: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    try:
+        client = _get_brave_client_singleton()
+    except Exception as exc:
+        return {"status": "error", "error": str(exc), "query": query, "kind": kind}
+
+    try:
+        results = await asyncio.to_thread(
+            client.search,
+            query,
+            kind,
+            count,
+            country,
+            lang,
+            safesearch,
+            extra_params,
+        )
+    except Exception as exc:
+        return {"status": "error", "error": str(exc), "query": query, "kind": kind}
+
+    return {"status": "success", "query": query, "kind": kind, "results": results}
+
+
+async def exa_search_async(
+    query: str,
+    num_results: int = 10,
+    search_type: str = "auto",
+    include_domains: Optional[List[str]] = None,
+    exclude_domains: Optional[List[str]] = None,
+    category: Optional[str] = None,
+    start_published: Optional[str] = None,
+    end_published: Optional[str] = None,
+) -> Dict[str, Any]:
+    try:
+        client = _get_exa_client_singleton()
+    except Exception as exc:
+        return {"status": "error", "error": str(exc), "query": query}
+
+    try:
+        results = await asyncio.to_thread(
+            client.search,
+            query,
+            num_results,
+            search_type,
+            include_domains,
+            exclude_domains,
+            category,
+            start_published,
+            end_published,
+        )
+    except Exception as exc:
+        return {"status": "error", "error": str(exc), "query": query}
+
+    return {
+        "status": "success",
+        "query": query,
+        "search_type": search_type,
+        "results": results,
+    }
+
+
+async def hybrid_web_search_async(
+    query: str,
+    top_k: int = 10,
+    brave_kinds: Optional[List[str]] = None,
+    brave_each_k: int = 8,
+    exa_k: int = 8,
+    exa_type: str = "auto",
+    fuse_w_brave: float = 1.0,
+    fuse_w_exa: float = 1.2,
+    enrich_with_exa_contents: bool = True,
+    enrich_limit: int = 5,
+    lang: str = "ko",
+    country: str = "kr",
+    safesearch: str = "moderate",
+    include_domains: Optional[List[str]] = None,
+    exclude_domains: Optional[List[str]] = None,
+    category: Optional[str] = None,
+    start_published: Optional[str] = None,
+    end_published: Optional[str] = None,
+) -> Dict[str, Any]:
+    brave_kinds = brave_kinds or ["web", "news"]
+
+    try:
+        brave_client = _get_brave_client_singleton()
+    except Exception as exc:
+        return {"status": "error", "error": str(exc), "query": query, "stage": "brave_init"}
+
+    try:
+        exa_client = _get_exa_client_singleton()
+    except Exception as exc:
+        return {"status": "error", "error": str(exc), "query": query, "stage": "exa_init"}
+
+    debug: Dict[str, Any] = {"brave_counts": {}, "exa_count": 0, "enriched": 0, "ts": _now_iso()}
+    groups: List[List[Dict[str, Any]]] = []
+
+    brave_tasks = [
+        asyncio.to_thread(
+            brave_client.search,
+            query,
+            kind,
+            brave_each_k,
+            country,
+            lang,
+            safesearch,
+            None,
+        )
+        for kind in brave_kinds
+    ]
+
+    brave_results = await asyncio.gather(*brave_tasks, return_exceptions=True) if brave_tasks else []
+    for kind, result in zip(brave_kinds, brave_results):
+        if isinstance(result, Exception):
+            debug.setdefault("brave_errors", {})[kind] = str(result)
+            groups.append([])
+        else:
+            debug["brave_counts"][kind] = len(result)
+            groups.append(result)
+
+    exa_result: List[Dict[str, Any]] = []
+    try:
+        exa_result = await asyncio.to_thread(
+            exa_client.search,
+            query,
+            exa_k,
+            exa_type,
+            include_domains,
+            exclude_domains,
+            category,
+            start_published,
+            end_published,
+        )
+        debug["exa_count"] = len(exa_result)
+    except Exception as exc:
+        debug["exa_error"] = str(exc)
+    finally:
+        groups.append(exa_result)
+
+    weights = [fuse_w_brave] * len(brave_kinds) + [fuse_w_exa]
+    fused = _rrf(groups, weights=weights, k=60, top_k=top_k)
+
+    if enrich_with_exa_contents and fused:
+        urls: List[str] = []
+        for item in fused[:enrich_limit]:
+            url = item.get("url")
+            if url:
+                urls.append(url)
+        try:
+            url2content = await asyncio.to_thread(
+                exa_client.contents,
+                urls,
+                False,
+                True,
+                True,
+            )
+            for item in fused:
+                url = item.get("url")
+                if url and url in url2content:
+                    content = url2content[url]
+                    item["summary"] = content.get("summary")
+                    if not item.get("snippet"):
+                        highlights = content.get("highlights") or []
+                        item["snippet"] = content.get("summary") or (highlights[0] if highlights else None)
+            debug["enriched"] = len(url2content)
+        except Exception as exc:
+            debug["enrich_error"] = str(exc)
+
+    return {
+        "status": "success",
+        "query": query,
+        "results": fused,
+        "debug": debug,
+    }
