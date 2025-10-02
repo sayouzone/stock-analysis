@@ -1,5 +1,3 @@
-import json
-import requests  # type: ignore
 import asyncio
 from bs4 import BeautifulSoup # type: ignore
 import httpx # type: ignore
@@ -16,7 +14,7 @@ NAVER_M_STOCK_API_BASE = 'https://m.stock.naver.com/api/stock'
 
 DEFAULT_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36'
 from utils.gcpmanager import BQManager
-from utils.companydict import companydict
+
 
 HTML_PARSER = 'html.parser'
 
@@ -53,8 +51,8 @@ def _infer_currency(nation_code: str | None) -> str | None:
 
 class News:
     """Independent Naver news pipeline (no NaverCrawler dependency)."""
-    def __init__(self):
-        self.bq_manager = BQManager()
+    def __init__(self, bq_manager: BQManager):
+        self.bq_manager = bq_manager
         self.client = httpx.AsyncClient(headers={
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36'
         }, follow_redirects=True)
@@ -73,12 +71,11 @@ class News:
         }
 
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(api_url, headers=api_headers)
-                response.raise_for_status()
-                search_result = response.json()
-                news_list = search_result.get('items', [])
-                yield {"type": "progress", "step": "api_call", "status": "done", "total": len(news_list)}
+            response = await self.client.get(api_url, headers=api_headers)
+            response.raise_for_status()
+            search_result = response.json()
+            news_list = search_result.get('items', [])
+            yield {"type": "progress", "step": "api_call", "status": "done", "total": len(news_list)}
 
         except Exception as e:
             yield {"type": "error", "message": f"API request failed: {e}"}
@@ -154,14 +151,15 @@ class News:
         return df_treasures
 
 class Market:
-    def __init__(self, company: str | None = None):
+    def __init__(self, bq_manager: BQManager, company_dict: Any, company: str | None = None):
         self._header = {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
             'Accept' : "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
         }
         self.base_url = 'https://finance.naver.com'
         self.company = company or '005930'
-        self.bq_manager = BQManager()
+        self.bq_manager = bq_manager
+        self.company_dict = company_dict
         self.client = httpx.AsyncClient(headers=self._header, follow_redirects=True)
 
     async def market_collect(self, company: str | None = None, start_date: str | None = None, end_date: str | None = None, max_page: int = 10):
@@ -173,11 +171,11 @@ class Market:
         if not start_date:
             start_date = (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d')
         
-        company_name = companydict.get_company_by_code(self.company) or self.company
+        company_name = self.company_dict.get_company_by_code(self.company) or self.company
         table_id = f"market-naverfinance-{company_name}"
 
         crawled_df = pd.DataFrame()
-        async for progress_update in self._crawl_market_data(max_page):
+        async for progress_update in _crawl_price_history(self.company, self.client, max_page=max_page):
             if progress_update["type"] == "progress":
                 yield progress_update
             elif progress_update["type"] == "result":
@@ -196,80 +194,6 @@ class Market:
         yield {"type": "progress", "step": "saving", "status": "saving to BigQuery"}
         df_saved = self._prepare_and_save_market_data(crawled_df, table_id)
         yield {"type": "result", "data": {"saved": len(df_saved)}}
-    
-    async def _crawl_market_data(self, max_page: int):
-        page = 1
-        final_max_page = max_page
-
-        last_page_number = await self._find_last_page_number(self.base_url)
-        final_max_page = min(max_page, last_page_number)
-
-        full_df = []
-        while page <= final_max_page:
-            yield {"type": "progress", "step": "scraping", "current": page, "total": final_max_page}
-            try:
-                url = self.base_url + f'/item/sise_day.nhn?code={self.company}&page={page}'
-                response = await self.client.get(url)
-                response.raise_for_status()
-                
-                dfs = pd.read_html(StringIO(response.text))
-                df = dfs[0]
-                df.dropna(how='all', inplace=True)
-                if not df.empty:
-                    full_df.append(df)
-                
-                page += 1
-                await asyncio.sleep(random.uniform(0.1, 0.3))
-            except Exception as e:
-                print(f"Error scraping page {page}: {e}")
-                page += 1
-                continue
-        
-        if not full_df:
-            yield {"type": "result", "data": pd.DataFrame()}
-            return
-
-        crawled_df = pd.concat(full_df, ignore_index=True)
-        crawled_df.rename(columns={
-            '날짜': 'date',
-            '종가': 'close',
-            '시가': 'open',
-            '고가': 'high',
-            '저가': 'low',
-            '거래량': 'volume'
-        }, inplace=True)
-        
-        if '전일비' in crawled_df.columns:
-            crawled_df.drop(columns=['전일비'], inplace=True)
-
-        numeric_cols = ['close', 'open', 'high', 'low', 'volume']
-        for col in numeric_cols:
-            if col in crawled_df.columns:
-                crawled_df[col] = pd.to_numeric(crawled_df[col].astype(str).str.replace(',', '', regex=False), errors='coerce').fillna(0).astype('int64')
-
-        crawled_df['date'] = pd.to_datetime(crawled_df['date'], errors='coerce')
-        crawled_df.dropna(subset=['date'], inplace=True)
-        
-        yield {"type": "result", "data": crawled_df}
-    async def _find_last_page_number(self, url: str) -> int:
-        try:
-            url = url + f'/item/sise_day.nhn?code={self.company}&page=1'
-            response = await self.client.get(url)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, HTML_PARSER)
-            match = None
-            pg_rr_tag = soup.select_one('.pgRR a')
-            if pg_rr_tag:
-                href_value = pg_rr_tag.get('href')
-                if isinstance(href_value, str):
-                    match = re.search(r'page=(\d+)', href_value)
-            if match:
-                last_page_number = int(match.group(1))
-            else:
-                last_page_number = 1
-        except Exception:
-            last_page_number = 1
-        return last_page_number
     
     def _prepare_and_save_market_data(self, df: pd.DataFrame, table_id: str) -> pd.DataFrame:
         """Clean market dataframe and persist to BigQuery in one step.
@@ -335,7 +259,7 @@ class Market:
         if company:
             self.company = company
         
-        company_name = companydict.get_company_by_code(self.company) or self.company
+        company_name = self.company_dict.get_company_by_code(self.company) or self.company
         table_id = f"market-naverfinance-{company_name}"
         
         cached_df = self.bq_manager.query_table(table_id=table_id, order_by_date=True)
@@ -348,7 +272,7 @@ class Market:
         yield {"type": "result", "data": formatted_data}
 
     async def _format_response_from_df(self, df: pd.DataFrame):
-        company_name = companydict.get_company_by_code(self.company) or self.company
+        company_name = self.company_dict.get_company_by_code(self.company) or self.company
         market_cap = await self._get_market_cap()
 
         if df is None or df.empty:
@@ -459,7 +383,7 @@ async def _fetch_company_metadata(company_code: str) -> Dict[str, Any]:
     return metadata
 
 
-async def _find_last_page_number_market(company_code: str, client: httpx.AsyncClient) -> int:
+async def _find_last_page_number(company_code: str, client: httpx.AsyncClient) -> int:
     try:
         url = f"{NAVER_FINANCE_BASE_URL}/item/sise_day.nhn?code={company_code}&page=1"
         response = await client.get(url)
@@ -470,7 +394,7 @@ async def _find_last_page_number_market(company_code: str, client: httpx.AsyncCl
         if pg_rr_tag:
             href_value = pg_rr_tag.get('href')
             if isinstance(href_value, str):
-                match = re.search(r'page=(\\d+)', href_value)
+                match = re.search(r'page=(\d+)', href_value)
         if match:
             last_page_number = int(match.group(1))
         else:
@@ -480,16 +404,17 @@ async def _find_last_page_number_market(company_code: str, client: httpx.AsyncCl
     return last_page_number
 
 
-async def _crawl_market_dataframe(
+async def _crawl_price_history(
     company_code: str,
-    start_date: str,
-    end_date: str,
     client: httpx.AsyncClient,
-) -> pd.DataFrame:
-    last_page = await _find_last_page_number_market(company_code, client)
+    max_page: int | None = None,
+):
+    last_page = await _find_last_page_number(company_code, client)
+    final_max_page = min(max_page, last_page) if max_page else last_page
 
     full_df = []
-    for page in range(1, last_page + 1):
+    for page in range(1, final_max_page + 1):
+        yield {"type": "progress", "step": "scraping", "current": page, "total": final_max_page}
         try:
             url = f"{NAVER_FINANCE_BASE_URL}/item/sise_day.nhn?code={company_code}&page={page}"
             response = await client.get(url)
@@ -507,7 +432,8 @@ async def _crawl_market_dataframe(
             continue
 
     if not full_df:
-        return pd.DataFrame()
+        yield {"type": "result", "data": pd.DataFrame()}
+        return
 
     crawled_df = pd.concat(full_df, ignore_index=True)
     crawled_df.rename(columns={
@@ -534,28 +460,25 @@ async def _crawl_market_dataframe(
 
     crawled_df['date'] = pd.to_datetime(crawled_df['date'], errors='coerce')
     crawled_df.dropna(subset=['date'], inplace=True)
-
-    crawled_df = crawled_df[
-        (crawled_df['date'] >= pd.to_datetime(start_date)) &
-        (crawled_df['date'] <= pd.to_datetime(end_date))
-    ]
-
-    return crawled_df
+    
+    yield {"type": "result", "data": crawled_df}
 
 
 async def fetch_market_dataframe(
     company: str,
     start_date: str,
     end_date: str,
+    company_dict: Any,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Fetch Naver Finance market data and metadata for a company code or name."""
 
-    company_code = companydict.get_code(company)
+    company_code = company_dict.get_code(company)
     if not company_code and company.isdigit():
         company_code = company
     if not company_code:
         raise ValueError(f"Code for {company} not found.")
 
+    crawled_df = pd.DataFrame()
     async with httpx.AsyncClient(
         headers={
             'User-Agent': DEFAULT_USER_AGENT,
@@ -563,11 +486,19 @@ async def fetch_market_dataframe(
         },
         follow_redirects=True,
     ) as client:
-        crawled_df = await _crawl_market_dataframe(company_code, start_date, end_date, client)
+        async for update in _crawl_price_history(company_code, client):
+            if update['type'] == 'result':
+                crawled_df = update['data']
+
+    if not crawled_df.empty:
+        crawled_df = crawled_df[
+            (crawled_df['date'] >= pd.to_datetime(start_date)) &
+            (crawled_df['date'] <= pd.to_datetime(end_date))
+        ]
 
     metadata: Dict[str, Any] = {
-        "company_id": companydict.get_ticker(company) or company_code,
-        "company_name": companydict.get_company_by_code(company_code) or company,
+        "company_id": company_dict.get_ticker(company) or company_code,
+        "company_name": company_dict.get_company_by_code(company_code) or company,
         "exchange": "KRX",
         "currency": "KRW",
         "market_cap": None,
