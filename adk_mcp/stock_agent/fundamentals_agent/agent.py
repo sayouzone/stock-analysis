@@ -44,6 +44,23 @@ FUNDAMENTALS_FETCHER_GUIDANCE = """
 - 티커를 활용해 기업이 상장된 국가를 파악하십시오.
 - 숫자만 이루어진 한국 종목 코드(예: 005930, 000660 등)는 기본적으로 한국(KR) 상장으로 간주합니다.
 - 상장 국가를 확정할 수 없다면 FundamentalsData.country 필드를 "Unknown"으로 설정하십시오.
+
+MCP Tool 사용 지침:
+1. **한국 주식 (종목 코드가 6자리 숫자인 경우)**:
+   - `find_fnguide_data` 툴을 사용하여 FnGuide에서 재무제표 3종을 가져옵니다.
+   - 예: find_fnguide_data(stock="005930")
+
+2. **해외 주식 (미국 등 해외 상장 주식)**:
+   - `get_yahoofinance_fundamentals` 툴을 사용하여 Yahoo Finance에서 재무제표 3종(balance_sheet, income_statement, cash_flow)을 한 번에 가져옵니다.
+   - 이 툴은 자동으로 세 가지 재무제표를 모두 수집하므로, 한 번만 호출하면 됩니다.
+   - 예: get_yahoofinance_fundamentals(query="AAPL")
+
+3. **데이터 매핑**:
+   - FnGuide: "포괄손익계산서" → income_statement, "재무상태표" → balance_sheet, "현금흐름표" → cash_flow
+   - Yahoo Finance: 이미 올바른 키 이름으로 반환됨 (balance_sheet, income_statement, cash_flow)
+
+4. **오류 처리**:
+   - 재무제표 데이터 중 일부가 없을 수 있습니다. 각 필드를 확인하고 없으면 "데이터 없음" 또는 적절한 메시지를 설정하십시오.
 """
 
 if full_instruction:

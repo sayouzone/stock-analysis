@@ -7,7 +7,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
-from utils.fnguide import Fundamentals as FnGuideFundamentals
+from utils.crawler.fnguide import FnGuideCrawler
 from utils.yahoofinance import Fundamentals as YahooFundamentals
 import pandas as pd
 import json
@@ -21,7 +21,8 @@ mcp = FastMCP(name="StockFundamentalsServer")
     tags={"finance", "stocks", "fundamentals", "korea"}
 )
 def fetch_fnguide_data(stock: str):
-    return FnGuideFundamentals(stock).fundamentals()
+    crawler = FnGuideCrawler(stock=stock)
+    return crawler.fundamentals()
 
 
 @mcp.tool(
@@ -34,6 +35,9 @@ def fetch_fnguide_data(stock: str):
     tags={"finance", "stocks", "fundamentals", "global"}
 )
 def fetch_yahoofinance_data(query: str, attribute: str):
+    """
+    단일 attribute를 가져오는 함수 (후방 호환성 유지)
+    """
     data = YahooFundamentals().fundamentals(query=query, attribute_name_str=attribute)
 
     if isinstance(data, pd.DataFrame):
@@ -43,6 +47,98 @@ def fetch_yahoofinance_data(query: str, attribute: str):
     if isinstance(data, dict):
         return data
     return data
+
+
+@mcp.tool(
+    name="get_yahoofinance_fundamentals",
+    description=(
+        "Fetch all three core financial statements (income statement, balance sheet, cash flow) "
+        "for a given company from Yahoo Finance in one call. "
+        "Supports both Korean stocks (e.g., '005930', '삼성전자') and international stocks (e.g., 'AAPL', 'TSLA'). "
+        "Returns a structured dictionary with ticker, country, and all three financial statements as JSON strings."
+    ),
+    tags={"finance", "stocks", "fundamentals", "global", "complete"}
+)
+def get_yahoofinance_fundamentals(query: str):
+    """
+    재무제표 3종(income_stmt, balance_sheet, cashflow)을 한 번에 가져오는 통합 함수
+
+    Args:
+        query: 종목 코드 또는 회사명 (예: '005930', '삼성전자', 'AAPL', 'Apple')
+
+    Returns:
+        dict: {
+            "ticker": str,  # Yahoo Finance 티커 (예: '005930.KS', 'AAPL')
+            "country": str,  # 상장 국가 (예: 'KR', 'US', 'Unknown')
+            "balance_sheet": str | None,  # 재무상태표 (JSON 문자열)
+            "income_statement": str | None,  # 손익계산서 (JSON 문자열)
+            "cash_flow": str | None  # 현금흐름표 (JSON 문자열)
+        }
+    """
+    import yfinance as yf
+    from utils.companydict import companydict as find
+
+    # companydict를 통해 올바른 티커 형식 조회
+    # 한국 주식: '005930' → '005930.KS'
+    # 미국 주식: 'AAPL' → 'AAPL'
+    ticker_symbol = find.get_ticker(query)
+
+    # companydict에 없는 경우 입력값 그대로 사용 (대문자 변환)
+    if not ticker_symbol:
+        ticker_symbol = query.upper()
+
+    # yfinance Ticker 객체 생성
+    ticker = yf.Ticker(ticker_symbol)
+
+    # 국가 정보 추론
+    country = "Unknown"
+    try:
+        info = ticker.info or {}
+        country = info.get("country") or "Unknown"
+    except Exception:
+        pass
+
+    # 한국 종목 코드 패턴 확인 (.KS 또는 .KQ 접미사)
+    if ".KS" in ticker_symbol or ".KQ" in ticker_symbol:
+        country = "KR"
+    # 6자리 숫자만 있는 경우도 한국으로 추정 (예: 사용자가 '005930' 직접 입력)
+    elif ticker_symbol.replace(".KS", "").replace(".KQ", "").isdigit() and len(ticker_symbol.replace(".KS", "").replace(".KQ", "")) == 6:
+        country = "KR"
+
+    # 재무제표 3종 수집
+    result = {
+        "ticker": ticker_symbol,
+        "country": country,
+        "balance_sheet": None,
+        "income_statement": None,
+        "cash_flow": None
+    }
+
+    # 1. Balance Sheet (재무상태표)
+    try:
+        balance_sheet = ticker.balance_sheet
+        if balance_sheet is not None and not balance_sheet.empty:
+            result["balance_sheet"] = balance_sheet.to_json(orient="columns", date_format="iso")
+    except Exception as e:
+        print(f"Warning: Failed to fetch balance_sheet for {ticker_symbol}: {e}")
+
+    # 2. Income Statement (손익계산서)
+    try:
+        income_stmt = ticker.income_stmt
+        if income_stmt is not None and not income_stmt.empty:
+            result["income_statement"] = income_stmt.to_json(orient="columns", date_format="iso")
+    except Exception as e:
+        print(f"Warning: Failed to fetch income_stmt for {ticker_symbol}: {e}")
+
+    # 3. Cash Flow (현금흐름표)
+    try:
+        cashflow = ticker.cashflow
+        if cashflow is not None and not cashflow.empty:
+            result["cash_flow"] = cashflow.to_json(orient="columns", date_format="iso")
+    except Exception as e:
+        print(f"Warning: Failed to fetch cashflow for {ticker_symbol}: {e}")
+
+    return result
 
 @mcp.tool(
     name="save_fundamentals_data_to_gcs",

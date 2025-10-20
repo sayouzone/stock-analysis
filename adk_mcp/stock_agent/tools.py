@@ -59,7 +59,12 @@ fundamentals_mcp_tool = MCPToolset(
         ),
         timeout=30,
     ),
-    tool_filter=['find_fnguide_data', 'find_yahoofinance_data', 'save_fundamentals_data_to_gcs'],
+    tool_filter=[
+        'find_fnguide_data',
+        'find_yahoofinance_data',
+        'get_yahoofinance_fundamentals',  # 재무제표 3종 자동 수집
+        'save_fundamentals_data_to_gcs'
+    ],
 )
 
 market_mcp_tool = MCPToolset(
