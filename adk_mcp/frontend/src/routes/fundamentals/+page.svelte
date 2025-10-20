@@ -18,9 +18,8 @@ import FundamentalsViewer from '$lib/components/FundamentalsViewer.svelte';
 
 	function requestFundamentals() {
 		if (!currentTicker?.code || fundamentals.status === 'loading') return;
-		const code = currentTicker.code.trim();
-		const site = /^[0-9]{5,6}$/.test(code) ? 'fnguide' : 'yahoofinance';
-		fundamentalsState.load(site, code);
+		const ticker = currentTicker.code.trim();
+		fundamentalsState.load(ticker);
 	}
 
 	onMount(() => {

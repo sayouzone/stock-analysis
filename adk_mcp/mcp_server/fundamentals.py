@@ -17,8 +17,15 @@ mcp = FastMCP(name="StockFundamentalsServer")
 
 @mcp.tool(
     name="find_fnguide_data",
-    description="Fetch Korean stock fundamentals data from FnGuide for a given Korea stock code.",
-    tags={"finance", "stocks", "fundamentals", "korea"}
+    description="""FnGuide에서 한국 주식 재무제표 수집.
+    사용 대상:
+    - 6자리 숫자 티커: 005930, 000660
+    - .KS/.KQ 접미사: 005930.KS, 035720.KQ
+    - 한국 기업명: 삼성전자, SK하이닉스
+
+    반환: 재무상태표, 포괄손익계산서, 현금흐름표 (연간 데이터)
+    """,
+    tags={"fnguide", "fundamentals", "korea"}
 )
 def fetch_fnguide_data(stock: str):
     crawler = FnGuideCrawler(stock=stock)
@@ -51,13 +58,14 @@ def fetch_yahoofinance_data(query: str, attribute: str):
 
 @mcp.tool(
     name="get_yahoofinance_fundamentals",
-    description=(
-        "Fetch all three core financial statements (income statement, balance sheet, cash flow) "
-        "for a given company from Yahoo Finance in one call. "
-        "Supports both Korean stocks (e.g., '005930', '삼성전자') and international stocks (e.g., 'AAPL', 'TSLA'). "
-        "Returns a structured dictionary with ticker, country, and all three financial statements as JSON strings."
-    ),
-    tags={"finance", "stocks", "fundamentals", "global", "complete"}
+    description="""Yahoo Finance에서 해외 주식 재무제표 수집.
+    사용 대상:
+    - 알파벳 티커 (1-5자): AAPL, TSLA, GOOGL
+    - 해외 기업명: Apple, Tesla, Microsoft
+
+    반환: balance_sheet, income_statement, cash_flow (연간 데이터)
+    """,
+    tags={"yahoo", "fundamentals", "global"}
 )
 def get_yahoofinance_fundamentals(query: str):
     """
