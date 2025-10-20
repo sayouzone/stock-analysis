@@ -7,7 +7,7 @@ import pandas as pd # type: ignore
 from datetime import datetime, timedelta
 from io import StringIO
 from urllib import parse
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 
 NAVER_FINANCE_BASE_URL = 'https://finance.naver.com'
 NAVER_M_STOCK_API_BASE = 'https://m.stock.naver.com/api/stock'
@@ -51,8 +51,12 @@ def _infer_currency(nation_code: str | None) -> str | None:
 
 class News:
     """Independent Naver news pipeline (no NaverCrawler dependency)."""
-    def __init__(self, bq_manager: BQManager):
-        self.bq_manager = bq_manager
+    def __init__(self, bq_manager: Optional[BQManager] = None):
+        if bq_manager:
+            self.bq_manager = bq_manager
+        else:
+            self.bq_manager = BQManager()
+            
         self.client = httpx.AsyncClient(headers={
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36'
         }, follow_redirects=True)
@@ -151,7 +155,19 @@ class News:
         return df_treasures
 
 class Market:
-    def __init__(self, bq_manager: BQManager, company_dict: Any, company: str | None = None):
+    def __init__(self, 
+                 bq_manager: Optional[BQManager] = None, 
+                 company_dict: Optional[Any] = None, 
+                 company: Optional[str] = None):
+        
+        if company_dict:
+            self.company_dict = company_dict
+        
+        if bq_manager:
+            self.bq_manager = bq_manager
+        else:
+            self.bq_manager = BQManager()
+
         self._header = {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
             'Accept' : "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
