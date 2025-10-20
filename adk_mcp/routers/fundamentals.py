@@ -5,7 +5,8 @@ from datetime import datetime, date, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException
-from utils import yahoofinance, fnguide, opendart
+from utils import yahoofinance, opendart
+from utils.crawler import fnguide
 from utils.companydict import companydict as find
 from utils.gcpmanager import GCSManager
 
@@ -16,7 +17,7 @@ from stock_agent.fundamentals_agent import agent as fundamentals_agent
 
 # --- 서비스 매핑 ---
 SERVICE_MAP = {
-    "fnguide": fnguide.Fundamentals(),
+    "fnguide": fnguide.FnGuideCrawler,
     "yahoofinance": yahoofinance.Fundamentals(), # Changed from YahooCrawler to Fundamentals
     "opendart": opendart.OpenDartCrawler(), 
 }

@@ -6,7 +6,7 @@ import FundamentalsViewer from '$lib/components/FundamentalsViewer.svelte';
 
 	$: currentTicker = $selectedTicker;
 	$: fundamentals = $fundamentalsState;
-	let lastSelection: string | null = null;
+	let lastSelection = $state<string | null>(null);
 
 	$: {
 		const code = currentTicker?.code ?? null;

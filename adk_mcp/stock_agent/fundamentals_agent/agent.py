@@ -22,9 +22,10 @@ from pydantic import BaseModel, Field
 
 from stock_agent.tools import (
     fundamentals_mcp_tool,
-    hybrid_web_search,
-    brave_raw_search,
-    WEB_SEARCH_TOOL_AVAILABLE,
+    # 웹 검색 기능 제거
+    # hybrid_web_search,
+    # brave_raw_search,
+    # WEB_SEARCH_TOOL_AVAILABLE,
 )
 from stock_agent.fundamentals_agent.prompt import fetch_fundamentals_data_instructions
 from google.adk.tools.set_model_response_tool import SetModelResponseTool
@@ -40,10 +41,9 @@ CURRENT_DATE_LINE_EN = f"Today's date is {CURRENT_DATE}."
 
 FUNDAMENTALS_FETCHER_GUIDANCE = """
 추가 지침:
-- 티커와 도구를 활용해 기업이 상장된 국가를 가능한 한 정확히 파악하십시오.
-- 숫자만 이루어진 한국 종목 코드(예: 005930, 000660 등)는 기본적으로 한국(KR) 상장으로 간주할 수 있습니다.
-- 해외 티커의 경우 제공된 Brave/Exa 하이브리드 웹 검색 도구를 활용해 상장 시장과 국가를 근거와 함께 확인하십시오. 확신할 수 있는 ISO 2자리 국가 코드를 사용하세요(예: "US", "JP", "HK").
-- 상장 국가를 확정할 수 없다면 FundamentalsData.country 필드를 "Unknown"으로 설정하고 이유를 남기십시오.
+- 티커를 활용해 기업이 상장된 국가를 파악하십시오.
+- 숫자만 이루어진 한국 종목 코드(예: 005930, 000660 등)는 기본적으로 한국(KR) 상장으로 간주합니다.
+- 상장 국가를 확정할 수 없다면 FundamentalsData.country 필드를 "Unknown"으로 설정하십시오.
 """
 
 if full_instruction:
@@ -155,6 +155,7 @@ def _upload_to_destinations(
 
 
 def _fallback_fundamentals_data(ticker: str, message: str) -> dict[str, str]:
+    """재무제표 3종만 포함하는 폴백 데이터"""
     fallback_message = (message[:480] + "…") if len(message) > 480 else message
     return {
         "ticker": ticker or "",
@@ -162,12 +163,6 @@ def _fallback_fundamentals_data(ticker: str, message: str) -> dict[str, str]:
         "balance_sheet": fallback_message,
         "income_statement": fallback_message,
         "cash_flow": fallback_message,
-        "profitability": fallback_message,
-        "stability": fallback_message,
-        "growth": fallback_message,
-        "economic_moat": fallback_message,
-        "management_capability": fallback_message,
-        "industry_macro_environment": fallback_message,
     }
 
 def _normalize_fundamentals_payload(value: Any, *, ticker: str) -> dict[str, Any]:
@@ -225,30 +220,20 @@ def _make_planner(thinking_budget: int | None) -> BuiltInPlanner | None:
 
 
 class FundamentalsData(BaseModel):
+    """재무제표 3종만 포함하는 기본 데이터 모델"""
     ticker: str = Field(description="The stock ticker symbol of the company.")
     country: str = Field(description="The country where the company is listed.")
-    balance_sheet: Optional[str] = Field(default=None, description="The company's balance sheet data.")
-    income_statement: Optional[str] = Field(default=None, description="The company's income statement data.")
-    cash_flow: Optional[str] = Field(default=None, description="The company's cash flow statement data.")
-    profitability : Optional[str] = Field(default=None, description="The company's profitability metrics.")
-    stability : Optional[str] = Field(default=None, description="The company's financial stability metrics.")
-    growth : Optional[str] = Field(default=None, description="The company's growth metrics.")
-    economic_moat : Optional[str] = Field(default=None, description="The company's economic moat assessment.")
-    management_capability : Optional[str] = Field(default=None, description="The company's management capability evaluation.")
-    industry_macro_environment : Optional[str] = Field(default=None, description="The industry and macroeconomic environment overview.")
+    balance_sheet: Optional[str] = Field(default=None, description="The company's balance sheet data (재무상태표).")
+    income_statement: Optional[str] = Field(default=None, description="The company's income statement data (손익계산서).")
+    cash_flow: Optional[str] = Field(default=None, description="The company's cash flow statement data (현금흐름표).")
     
 class AnalysisResult(BaseModel):
-    ticker : str = Field(description="The stock ticker symbol of the company.")
-    country : str = Field(description="The country where the company is listed.")
-    balance_sheet: str = Field(description="Summary of the company's balance sheet.")
-    income_statement: str = Field(description="Summary of the company's income statement.")
-    cash_flow: str = Field(description="Summary of the company's cash flow statement.")
-    profitability : str = Field(description="Analysis of the company's profitability.")
-    stability : str = Field(description="Analysis of the company's financial stability.")
-    growth : str = Field(description="Analysis of the company's growth potential.")
-    economic_moat : str = Field(description="Assessment of the company's economic moat.")
-    management_capability : str = Field(description="Evaluation of the company's management capability.")
-    industry_macro_environment : str = Field(description="Overview of the industry and macroeconomic environment.")
+    """재무제표 3종에 대한 분석 결과 모델"""
+    ticker: str = Field(description="The stock ticker symbol of the company.")
+    country: str = Field(description="The country where the company is listed.")
+    balance_sheet: str = Field(description="재무상태표 분석 - 자산, 부채, 자본 구조 및 건전성 평가")
+    income_statement: str = Field(description="손익계산서 분석 - 매출, 비용, 영업이익, 순이익 추이 분석")
+    cash_flow: str = Field(description="현금흐름표 분석 - 영업/투자/재무 활동 현금흐름 분석")
 
 class RatingResult(BaseModel):
     score: int = Field(description="Numerical score from 1 to 100")
@@ -428,9 +413,8 @@ class FundamentalsAnalysisAgent(BaseAgent):
         
         logger.info(f"[{self.name}] Completed all steps.")
 
+# 웹 검색 도구 제거 - fundamentals_mcp_tool만 사용
 _FETCHER_TOOLS: List[Any] = [fundamentals_mcp_tool]
-if WEB_SEARCH_TOOL_AVAILABLE:
-    _FETCHER_TOOLS.extend([hybrid_web_search, brave_raw_search])
 
 fundamentals_fetcher = LlmAgent(
     model = "gemini-2.5-flash",
@@ -454,16 +438,10 @@ analyst = LlmAgent(
         f"{CURRENT_DATE_LINE_EN}\n"
         "You are a seasoned financial analyst.\n"
         "Your task is to analyze the provided: {{fundamentals_data}}. \n"
-        "Deliver a comprehensive analysis covering:\n"
-        "- Balance Sheet\n"
-        "- Income Statement\n"
-        "- Cash Flow\n"
-        "- Profitability\n"
-        "- Stability\n"
-        "- Growth\n"
-        "- Economic Moat\n"
-        "- Management Capability\n"
-        "- Industry & Macro Environment\n"
+        "Deliver a comprehensive analysis covering ONLY the three financial statements:\n"
+        "- Balance Sheet (재무상태표): 자산, 부채, 자본의 구조와 건전성 분석\n"
+        "- Income Statement (손익계산서): 매출, 비용, 영업이익, 순이익의 추이 및 수익성 분석\n"
+        "- Cash Flow (현금흐름표): 영업/투자/재무 활동별 현금흐름 분석 및 유동성 평가\n"
         "\n"
         "Language requirement:\n"
         "- Write all narrative text in Korean. Use clear, natural Korean suitable for professional financial reports.\n"
@@ -474,17 +452,12 @@ analyst = LlmAgent(
         "  \"country\": \"...\",\n"
         "  \"balance_sheet\": \"...\",\n"
         "  \"income_statement\": \"...\",\n"
-        "  \"cash_flow\": \"...\",\n"
-        "  \"profitability\": \"...\",\n"
-        "  \"stability\": \"...\",\n"
-        "  \"growth\": \"...\",\n"
-        "  \"economic_moat\": \"...\",\n"
-        "  \"management_capability\": \"...\",\n"
-        "  \"industry_macro_environment\": \"...\"\n"
+        "  \"cash_flow\": \"...\"\n"
         "}\n"
         "\n"
         "Rules:\n"
-        "- Fill every field with a concise, well-supported narrative paragraph.\n"
+        "- Fill every field with a detailed, well-supported narrative paragraph (minimum 3-5 sentences per field).\n"
+        "- Focus on quantitative data, trends, ratios, and year-over-year comparisons.\n"
         "- Do not emit markdown, bullet lists, or code fences.\n"
         "- Do not include trailing comments or additional text outside the JSON object."
     ),
