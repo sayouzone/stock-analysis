@@ -4,7 +4,7 @@
 
 <section class="space-y-8">
 	<div class="space-y-2">
-		<h1 class="text-3xl font-bold tracking-tight">시그노바 요약</h1>
+		<h1 class="text-3xl font-bold tracking-tight">사이트 요약</h1>
 		<p class="text-muted-foreground">
 			좌측 네비게이션을 통해 펀더멘털, 시장, 뉴스 분석 페이지로 이동할 수 있습니다. 원하는 섹션을
 			선택해 상세 데이터를 불러오세요.
