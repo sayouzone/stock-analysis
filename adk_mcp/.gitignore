@@ -60,3 +60,5 @@ old/
 # Ignore compiled files
 cloudbuild.yaml
 .gcloudignore
+
+.claude

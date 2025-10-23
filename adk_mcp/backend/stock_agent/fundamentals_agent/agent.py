@@ -21,11 +21,9 @@ from google.adk.utils.context_utils import Aclosing
 from pydantic import BaseModel, Field
 
 from tools import fundamentals_mcp_tool
-from fundamentals_agent.prompt import fetch_fundamentals_data_instructions
+from fundamentals_agent.prompt import FUNDAMENTALS_FETCHER_INSTRUCTION
 from google.adk.tools.set_model_response_tool import SetModelResponseTool
 from utils.gcpmanager import GCSManager
-
-full_instruction = fetch_fundamentals_data_instructions()
 
 os.getenv("GOOGLE_API_KEY")
 
@@ -33,45 +31,7 @@ CURRENT_DATE = date.today().isoformat()
 CURRENT_DATE_LINE_KO = f"오늘 날짜는 {CURRENT_DATE}입니다."
 CURRENT_DATE_LINE_EN = f"Today's date is {CURRENT_DATE}."
 
-FUNDAMENTALS_FETCHER_GUIDANCE = """
-# 재무제표 데이터 수집 가이드
-
-## 티커 형식 기반 Tool 선택
-
-**한국 주식** → `find_fnguide_data`:
-- 6자리 숫자: 005930, 000660, 035720
-- .KS/.KQ 접미사: 005930.KS, 035720.KQ
-- 한국 기업명: 삼성전자, SK하이닉스
-
-**해외 주식** → `get_yahoofinance_fundamentals`:
-- 알파벳 티커: AAPL, TSLA, GOOGL
-- 해외 기업명: Apple, Tesla, Microsoft
-
-## 사용 예시
-
-# 한국 주식
-find_fnguide_data(stock="005930")
-find_fnguide_data(stock="삼성전자")
-
-# 해외 주식
-get_yahoofinance_fundamentals(query="AAPL")
-get_yahoofinance_fundamentals(query="Apple")
-
-## 데이터 키 매핑
-
-FnGuide:
-- "재무상태표" → balance_sheet
-- "포괄손익계산서" → income_statement
-- "현금흐름표" → cash_flow
-
-Yahoo Finance:
-- 이미 올바른 키 이름 사용 (변환 불필요)
-"""
-
-if full_instruction:
-    fundamentals_fetcher_instruction = f"{CURRENT_DATE_LINE_KO}\n\n{full_instruction}\n\n{FUNDAMENTALS_FETCHER_GUIDANCE}"
-else:
-    fundamentals_fetcher_instruction = f"{CURRENT_DATE_LINE_KO}\n\n{FUNDAMENTALS_FETCHER_GUIDANCE}"
+fundamentals_fetcher_instruction = f"{CURRENT_DATE_LINE_KO}\n\n{FUNDAMENTALS_FETCHER_INSTRUCTION}"
 
 # --- Runtime configuration (tunable via environment variables) ---
 FAST_MODE = os.getenv("FUNDAMENTALS_AGENT_FAST_MODE", "true").lower() == "true"

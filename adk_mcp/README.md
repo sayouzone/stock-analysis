@@ -4,6 +4,19 @@
 
 추후 LangGraph, CrewAI 등 적용 모델이 추가될 예정입니다.
 
+```tree
+├── frontend                # 프론트엔드             
+├── backend                 # 백엔드
+│   ├── utils               # 유틸리티(크롤링)
+│   ├── routers             # fastapi 라우터
+│   ├── mcp_server          # ADK 에이전트의 유틸 호출을 위한 MCP 서버
+│   └── stock_agent         # ADK 에이전트
+│            
+├── old                     # 활용 예제들
+├── main.py
+└── README.md               # 설명 - 다양한 설명 (Repository overview)
+```
+
 ## 설정
 
 빌드 명령어
