@@ -20,14 +20,8 @@ from google.adk.events import Event
 from google.adk.utils.context_utils import Aclosing
 from pydantic import BaseModel, Field
 
-from stock_agent.tools import (
-    fundamentals_mcp_tool,
-    # 웹 검색 기능 제거
-    # hybrid_web_search,
-    # brave_raw_search,
-    # WEB_SEARCH_TOOL_AVAILABLE,
-)
-from stock_agent.fundamentals_agent.prompt import fetch_fundamentals_data_instructions
+from tools import fundamentals_mcp_tool
+from fundamentals_agent.prompt import fetch_fundamentals_data_instructions
 from google.adk.tools.set_model_response_tool import SetModelResponseTool
 from utils.gcpmanager import GCSManager
 
