@@ -310,10 +310,15 @@ class Market:
         return result
 
 class Fundamentals:
-    GCS_CACHE_PREFIX = "yahoofinance_cache"
+    """
+    MCP 도구 기반 재무제표 수집 클래스 (캐싱 기능 포함)
+
+    기존 복잡한 분석 로직을 제거하고, 재무제표 3종만 수집하는 단순하고 명확한 구조로 리팩토링.
+    GCS 캐싱 기능은 유지하여 API 호출 비용을 최소화.
+    """
+    GCS_CACHE_PREFIX = "yahoofinance_fundamentals_cache"
 
     def __init__(self):
-        self.bq_manager = BQManager()
         self.gcs_manager = GCSManager()
 
     def fundamentals(
@@ -325,264 +330,124 @@ class Fundamentals:
         overwrite: bool = False,
         attribute_name_str: str | None = None
     ) -> dict[str, object]:
-        
+        """
+        Yahoo Finance에서 재무제표 3종을 수집합니다.
+
+        Args:
+            stock: 종목 코드 또는 회사명
+            query: stock의 별칭 (stock이 없으면 사용)
+            use_cache: GCS 캐시 사용 여부
+            overwrite: 캐시를 무시하고 새로 가져올지 여부
+            attribute_name_str: 특정 attribute만 가져올 경우 (예: 'income_stmt', 'balance_sheet')
+
+        Returns:
+            dict: {
+                "ticker": str,
+                "country": str,
+                "balance_sheet": str | None,  # JSON 문자열
+                "income_statement": str | None,  # JSON 문자열
+                "cash_flow": str | None  # JSON 문자열
+            }
+        """
         identifier = stock or query
         if not identifier:
             raise ValueError("Must provide either 'stock' or 'query'.")
 
         ticker_symbol = find.get_ticker(identifier) or identifier.upper()
 
-        # If a specific attribute is requested, bypass the full-summary cache and fetch directly.
+        # --- 특정 attribute만 요청하는 경우 (기존 호환성 유지) ---
         if attribute_name_str:
             ticker = yf.Ticker(ticker_symbol)
             if hasattr(ticker, attribute_name_str):
                 data = getattr(ticker, attribute_name_str)
-                # yfinance can return DataFrames, Series, or dicts. Convert to JSON-serializable format.
                 if isinstance(data, pd.DataFrame):
                     return json.loads(data.to_json(orient="records", date_format="iso"))
                 if isinstance(data, pd.Series):
                     return data.to_dict()
                 if isinstance(data, dict):
                     return data
-                return data # Fallback for other types
+                return data
             else:
                 raise ValueError(f"'{attribute_name_str}' is not a valid yfinance Ticker attribute.")
 
-        # --- Logic for full summary ---
+        # --- 재무제표 3종 수집 (MCP 도구 버전 로직) ---
         gcs_blob_name = f"{self.GCS_CACHE_PREFIX}/{ticker_symbol}.json"
 
+        # 캐시 확인
         if use_cache and not overwrite:
             cached_payload = self.gcs_manager.read_file(gcs_blob_name)
             if cached_payload:
                 try:
                     payload = json.loads(cached_payload)
-                    # Check if the cached data has the exchange rate if needed
-                    currency = payload.get('session_state', {}).get('currency')
-                    if currency and currency != 'KRW':
-                        if payload.get('session_state', {}).get('raw_snapshot', {}).get('usdkrw') is None:
-                            logging.info("Cached data is missing exchange rate. Refetching.")
-                        else:
-                            logging.info(f"Returning cached data for {ticker_symbol} from GCS: {gcs_blob_name}")
-                            return payload
-                    else:
-                        logging.info(f"Returning cached data for {ticker_symbol} from GCS: {gcs_blob_name}")
-                        return payload
+                    logging.info(f"Returning cached fundamentals for {ticker_symbol} from GCS: {gcs_blob_name}")
+                    return payload
                 except (json.JSONDecodeError, KeyError) as e:
-                    logging.warning(f"GCS cache read failed for {ticker_symbol} (corrupted/invalid JSON): {e}. Refetching.")
+                    logging.warning(f"GCS cache read failed for {ticker_symbol} (corrupted JSON): {e}. Refetching.")
 
+        # yfinance Ticker 객체 생성
         ticker = yf.Ticker(ticker_symbol)
 
+        # 국가 정보 추론
+        country = "Unknown"
         try:
             info = ticker.info or {}
-        except Exception:
-            info = {}
-        try:
-            fast_info = ticker.fast_info or {}
-        except Exception:
-            fast_info = {}
+            country = info.get("country") or "Unknown"
+        except Exception as e:
+            logging.warning(f"Failed to fetch ticker info for {ticker_symbol}: {e}")
 
-        def _get(*keys, src=None):
-            src = src or info
-            for key in keys:
-                if key in src and src[key] not in (None, ''):
-                    return src[key]
-            return None
+        # 한국 종목 코드 패턴 확인
+        if ".KS" in ticker_symbol or ".KQ" in ticker_symbol:
+            country = "KR"
+        elif ticker_symbol.replace(".KS", "").replace(".KQ", "").isdigit() and len(ticker_symbol.replace(".KS", "").replace(".KQ", "")) == 6:
+            country = "KR"
 
-        price = _get('last_price', src=fast_info) or _get('regularMarketPrice')
-        change = _get('regularMarketChange')
-        change_pct = _get('regularMarketChangePercent')
-        volume = _get('last_volume', src=fast_info) or _get('regularMarketVolume')
-        currency = _get('currency', src=fast_info) or _get('currency') or ''
-        market_cap = _get('market_cap', src=fast_info) or _get('marketCap')
-        trailing_pe = _get('trailingPE')
-        forward_pe = _get('forwardPE')
-        roe = _get('returnOnEquity')
-        beta = _get('beta')
-        dividend_yield_raw = _get('dividendYield')
-        dividend_yield = None
-        if isinstance(dividend_yield_raw, (int, float)):
-            dividend_yield = dividend_yield_raw * 100 if dividend_yield_raw < 1 else dividend_yield_raw
-        sector = _get('sector')
-        industry = _get('industry')
-        country = _get('country')
-        summary = _get('longBusinessSummary')
-        fifty_two_high = _get('fiftyTwoWeekHigh')
-        fifty_two_low = _get('fiftyTwoWeekLow')
-
-        usdkrw_rate = None
-        if currency and currency != 'KRW':
-            try:
-                rate_ticker_symbol = f"{currency}KRW=X"
-                rate_ticker = yf.Ticker(rate_ticker_symbol)
-                rate_info = rate_ticker.fast_info or {}
-                usdkrw_rate = rate_info.get('last_price')
-            except Exception as e:
-                logging.warning(f"Could not fetch exchange rate for {rate_ticker_symbol}: {e}")
-
-        def fmt_signed(value):
-            if value is None:
-                return '-'
-            try:
-                return f"{value:+.2f}"
-            except Exception:
-                return str(value)
-
-        def fmt_percent(value):
-            if value is None:
-                return '-'
-            try:
-                return f"{value:.2f}%"
-            except Exception:
-                return str(value)
-
-        def fmt_number(value):
-            if value is None:
-                return '-'
-            try:
-                return f"{value:,}"
-            except Exception:
-                return str(value)
-
-        def fmt_market_cap(value):
-            if value is None:
-                return '-'
-            try:
-                if value >= 1e12:
-                    return f"{value/1e12:.2f} 조"
-                if value >= 1e9:
-                    return f"{value/1e9:.2f} 십억"
-                if value >= 1e6:
-                    return f"{value/1e6:.2f} 백만"
-                return f"{value:,}"
-            except Exception:
-                return str(value)
-
-        market_conditions = [
-            {
-                '0': '종가/ 전일대비/ 수익률',
-                '1': f"{fmt_number(price)} / {fmt_signed(change)} / {fmt_percent(change_pct)}",
-                '2': '거래량',
-                '3': fmt_number(volume)
-            },
-            {
-                '0': f'시가총액({currency})',
-                '1': fmt_market_cap(market_cap),
-                '2': 'PER / 선행 PER',
-                '3': f"{trailing_pe or '-'} / {forward_pe or '-'}"
-            },
-            {
-                '0': '배당수익률',
-                '1': fmt_percent(dividend_yield),
-                '2': '베타(1년)',
-                '3': beta if beta is not None else '-'
-            }
-        ]
-        if fifty_two_high or fifty_two_low:
-            market_conditions.append({
-                '0': '52주.최고가/ 최저가',
-                '1': f"{fmt_number(fifty_two_high)} / {fmt_number(fifty_two_low)}",
-                '2': '',
-                '3': ''
-            })
-
-        industry_comparison = []
-        if trailing_pe is not None or forward_pe is not None:
-            industry_comparison.append({'category': 'PER', 'company': trailing_pe, 'kospi_electronics': forward_pe, 'KOSPI': None})
-        if roe is not None:
-            industry_comparison.append({'category': 'ROE', 'company': roe * 100 if roe < 1 else roe, 'kospi_electronics': None, 'KOSPI': None})
-        if dividend_yield is not None:
-            industry_comparison.append({'category': '배당수익률', 'company': dividend_yield, 'kospi_electronics': None, 'KOSPI': None})
-        if beta is not None:
-            industry_comparison.append({'category': '베타(1년)', 'company': beta, 'kospi_electronics': None, 'KOSPI': 1})
-
-        analysis_lines = []
-        if sector or industry:
-            analysis_lines.append(f"• 섹터/산업: {sector or '-'} / {industry or '-'}")
-        if country:
-            analysis_lines.append(f"• 상장 국가: {country}")
-        if market_cap:
-            analysis_lines.append(f"• 시가총액: {fmt_market_cap(market_cap)} {currency}")
-        if trailing_pe:
-            analysis_lines.append(f"• PER: {trailing_pe}")
-        if dividend_yield is not None:
-            analysis_lines.append(f"• 배당수익률: {dividend_yield:.2f}%")
-        if summary:
-            analysis_lines.append('\n' + summary)
-        analysis_text = ''.join(analysis_lines) if analysis_lines else '분석 요약을 생성할 수 없습니다.'
-
-        score = 70
-        if isinstance(trailing_pe, (int, float)) and trailing_pe < 15:
-            score += 5
-        if isinstance(dividend_yield, (int, float)) and dividend_yield > 2:
-            score += 5
-        if isinstance(beta, (int, float)) and beta < 1:
-            score += 3
-        if isinstance(forward_pe, (int, float)) and forward_pe < 12:
-            score += 4
-        score = max(55, min(95, int(round(score))))
-        if score >= 85:
-            rate = 'excellent'
-        elif score >= 70:
-            rate = 'good'
-        elif score >= 60:
-            rate = 'normal'
-        else:
-            rate = 'warning'
-        rating = {
-            'score': score,
-            'rate': rate,
-            'justification': '기본 지표(시가총액, 수익성, 배당 등)를 기반으로 산출한 단순 스코어입니다.'
-        }
-
+        # 재무제표 3종 수집
         result = {
-            'market_conditions': market_conditions,
-            'earning_issue': [],
-            'holdings_status': [],
-            'governance': [],
-            'shareholders': [],
-            'bond_rating': [],
-            'analysis': [],
-            'industry_comparison': industry_comparison,
-            'financialhighlight_annual': [],
-            'financialhighlight_netquarter': []
+            "ticker": ticker_symbol,
+            "country": country,
+            "balance_sheet": None,
+            "income_statement": None,
+            "cash_flow": None
         }
 
-        session_state = {
-            'ticker': ticker_symbol,
-            'currency': currency,
-            'source': 'yahoofinance',
-            'raw_snapshot': {
-                'marketCap': market_cap,
-                'pe': trailing_pe,
-                'forwardPE': forward_pe,
-                'dividendYield': dividend_yield,
-                'beta': beta,
-                'volume': volume,
-                'usdkrw': usdkrw_rate
-            }
-        }
-
-        final_data = {
-            'result': result,
-            'analysis': analysis_text,
-            'rating': rating,
-            'session_state': session_state,
-            'agent_final_response': None,
-        }
-
+        # 1. Balance Sheet (재무상태표)
         try:
-            payload_json = json.dumps(final_data, ensure_ascii=False, indent=4)
+            balance_sheet = ticker.balance_sheet
+            if balance_sheet is not None and not balance_sheet.empty:
+                result["balance_sheet"] = balance_sheet.to_json(orient="columns", date_format="iso")
+        except Exception as e:
+            logging.warning(f"Failed to fetch balance_sheet for {ticker_symbol}: {e}")
+
+        # 2. Income Statement (손익계산서)
+        try:
+            income_stmt = ticker.income_stmt
+            if income_stmt is not None and not income_stmt.empty:
+                result["income_statement"] = income_stmt.to_json(orient="columns", date_format="iso")
+        except Exception as e:
+            logging.warning(f"Failed to fetch income_stmt for {ticker_symbol}: {e}")
+
+        # 3. Cash Flow (현금흐름표)
+        try:
+            cashflow = ticker.cashflow
+            if cashflow is not None and not cashflow.empty:
+                result["cash_flow"] = cashflow.to_json(orient="columns", date_format="iso")
+        except Exception as e:
+            logging.warning(f"Failed to fetch cashflow for {ticker_symbol}: {e}")
+
+        # GCS에 캐시 저장
+        try:
+            payload_json = json.dumps(result, ensure_ascii=False, indent=2)
             self.gcs_manager.upload_file(
                 source_file=payload_json,
                 destination_blob_name=gcs_blob_name,
                 encoding="utf-8",
                 content_type="application/json; charset=utf-8",
             )
-            logging.info(f"Successfully cached data for {ticker_symbol} to GCS: {gcs_blob_name}")
+            logging.info(f"Successfully cached fundamentals for {ticker_symbol} to GCS: {gcs_blob_name}")
         except Exception as e:
             logging.error(f"GCS cache write failed for {ticker_symbol}: {e}")
 
-        return final_data
+        return result
 
 
 async def _collect_ticker_metadata(ticker: yf.Ticker, fallback: Dict[str, Any]) -> Dict[str, Any]:

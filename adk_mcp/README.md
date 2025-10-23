@@ -11,7 +11,7 @@
 │   ├── routers             # fastapi 라우터
 │   ├── mcp_server          # ADK 에이전트의 유틸 호출을 위한 MCP 서버
 │   └── stock_agent         # ADK 에이전트
-│       ├── fundamentals_agent # 펀더멘탈 분석(재무제표 정량적 분석) 에이전트
+│       ├── fundamentals_agent # 펀더멘탈 분석(재무제표 정성적 분석) 에이전트
 │       ├── market_agent    # 주가 데이터 분석 에이전트
 │       └── data_agent      # 데이터 처리 에이전트(임시)
 ├── old                     # 레거시 파일
@@ -74,3 +74,21 @@ pydantic_core._pydantic_core.ValidationError: 1 validation error for AnalysisRes
     For further information visit https://errors.pydantic.dev/2.11/v/json_invalid
 ```
 analyst 프롬프트에 json 형식으로 출력하는 요구가 없어서 발생한 오류이다.
+
+```
+ImportError: attempted relative import beyond top-level package
+```
+원인:
+ADK의 agent_loader가 fundamentals_agent를 최상위 모듈로 직접 로드합니다
+이 때 Python은 backend/stock_agent/를 sys.path에 추가합니다
+상대 경로 import (..tools, ...utils)는 최상위 패키지 밖으로 나갈 수 없어서 에러가 발생합니다
+해결 방법: agent.py:23-34에서 런타임에 backend/ 디렉토리를 sys.path에 추가했습니다:
+```
+# 현재 파일 위치: backend/stock_agent/fundamentals_agent/agent.py
+_backend_dir = Path(__file__).resolve().parent.parent.parent
+# parent → fundamentals_agent/
+# parent.parent → stock_agent/
+# parent.parent.parent → backend/
+
+sys.path.insert(0, str(_backend_dir))  # backend/를 sys.path에 추가
+```

@@ -20,6 +20,14 @@ from google.adk.events import Event
 from google.adk.utils.context_utils import Aclosing
 from pydantic import BaseModel, Field
 
+import sys
+from pathlib import Path
+
+# Add backend directory to sys.path for imports
+_backend_dir = Path(__file__).resolve().parent.parent.parent
+if str(_backend_dir) not in sys.path:
+    sys.path.insert(0, str(_backend_dir))
+
 from tools import fundamentals_mcp_tool
 from fundamentals_agent.prompt import fetch_fundamentals_prompt
 from google.adk.tools.set_model_response_tool import SetModelResponseTool
@@ -278,7 +286,6 @@ class FundamentalsAnalysisAgent(BaseAgent):
     analyst: LlmAgent
     reviewer: LlmAgent
     reviser: LlmAgent
-    rater: LlmAgent
     json_formatter: LlmAgent
 
     loop_agent: LoopAgent
@@ -292,7 +299,6 @@ class FundamentalsAnalysisAgent(BaseAgent):
             analyst: LlmAgent,
             reviewer: LlmAgent,
             reviser: LlmAgent,
-            rater: LlmAgent,
             json_formatter: LlmAgent,
     ):
         """
@@ -318,7 +324,6 @@ class FundamentalsAnalysisAgent(BaseAgent):
             fundamentals_fetcher,
             analyst,
             loop_agent,
-            rater,
             json_formatter,
         ]
 
@@ -328,7 +333,6 @@ class FundamentalsAnalysisAgent(BaseAgent):
             analyst=analyst,
             reviewer=reviewer,
             reviser=reviser,
-            rater=rater,
             json_formatter=json_formatter,
             loop_agent=loop_agent,
             sub_agents=sub_agents_list,
@@ -384,14 +388,6 @@ class FundamentalsAnalysisAgent(BaseAgent):
                 yield event
         else:
             logger.info(f"[{self.name}] Skipping ReviewerReviserLoop (fast mode).")
-
-        logger.info(f"[{self.name}]")
-
-        # 4. Rating for finalcial analysis quality
-        logger.info(f"[{self.name}] Running Rater...")
-        async for event in self.rater.run_async(ctx):
-            logger.info(f"[{self.name}] Event from Rater: {event.model_dump_json(indent=2, exclude_none=True)}")
-            yield event
         
         logger.info(f"[{self.name}] Completed all steps.")
 
@@ -486,43 +482,12 @@ reviser = LlmAgent(
     after_agent_callback=run_json_formatter_callback
 )
 
-rater = LlmAgent(
-    model=THINKING_MODEL,
-    planner=_make_planner(RATER_THINKING_BUDGET),
-    name="Rater",
-    instruction=(
-        f"{CURRENT_DATE_LINE_EN}\n"
-        "You are an expert financial analyst.\n"
-        "Your task is to rate the quality of the provided {{analysis_result}} on a scale from 1 to 100,\n"
-        "considering accuracy, depth, clarity, and relevance.\n"
-        "Provide a brief justification for your rating.\n"
-        "Output must be a JSON object with the following fields:\n"
-        "{\n"
-        "  \"score\": <1-100>,\n"
-        "  \"rate\": \"excellent\" | \"good\" | \"normal\" | \"warning\",\n"
-        "  \"justification\": \"short explanation\"\n"
-        "}\n"
-        "\n"
-        "score guide:\n"
-        "85-100: excellent\n"
-        "70-84: good\n"
-        "55-69: normal\n"
-        "-54: warning"
-    ),
-    input_schema=AnalysisResult,
-    output_schema=RatingResult,
-    output_key="rating",
-    disallow_transfer_to_parent=True,
-    disallow_transfer_to_peers=True
-)
-
 fundamentals_analysis_agent = FundamentalsAnalysisAgent(
     name="FundamentalsAnalysisAgent",
     fundamentals_fetcher=fundamentals_fetcher,
     analyst=analyst,
     reviewer=reviewer,
     reviser=reviser,
-    rater=rater,
     json_formatter=json_formatter,
 )
 

@@ -58,21 +58,27 @@ def fetch_yahoofinance_data(query: str, attribute: str):
 
 @mcp.tool(
     name="get_yahoofinance_fundamentals",
-    description="""Yahoo Finance에서 해외 주식 재무제표 수집.
+    description="""Yahoo Finance에서 해외 주식 재무제표 수집 (GCS 캐싱 지원).
     사용 대상:
     - 알파벳 티커 (1-5자): AAPL, TSLA, GOOGL
     - 해외 기업명: Apple, Tesla, Microsoft
 
     반환: balance_sheet, income_statement, cash_flow (연간 데이터)
     """,
-    tags={"yahoo", "fundamentals", "global"}
+    tags={"yahoo", "fundamentals", "global", "cached"}
 )
-def get_yahoofinance_fundamentals(query: str):
+def get_yahoofinance_fundamentals(query: str, use_cache: bool = True):
     """
     재무제표 3종(income_stmt, balance_sheet, cashflow)을 한 번에 가져오는 통합 함수
 
+    리팩토링된 utils.yahoofinance.Fundamentals 클래스를 사용하여:
+    - GCS 캐싱으로 반복 API 호출 방지
+    - 간결한 코드 구조
+    - logging 모듈을 통한 체계적인 로깅
+
     Args:
         query: 종목 코드 또는 회사명 (예: '005930', '삼성전자', 'AAPL', 'Apple')
+        use_cache: GCS 캐시 사용 여부 (기본값: True)
 
     Returns:
         dict: {
@@ -83,70 +89,8 @@ def get_yahoofinance_fundamentals(query: str):
             "cash_flow": str | None  # 현금흐름표 (JSON 문자열)
         }
     """
-    import yfinance as yf
-    from utils.companydict import companydict as find
-
-    # companydict를 통해 올바른 티커 형식 조회
-    # 한국 주식: '005930' → '005930.KS'
-    # 미국 주식: 'AAPL' → 'AAPL'
-    ticker_symbol = find.get_ticker(query)
-
-    # companydict에 없는 경우 입력값 그대로 사용 (대문자 변환)
-    if not ticker_symbol:
-        ticker_symbol = query.upper()
-
-    # yfinance Ticker 객체 생성
-    ticker = yf.Ticker(ticker_symbol)
-
-    # 국가 정보 추론
-    country = "Unknown"
-    try:
-        info = ticker.info or {}
-        country = info.get("country") or "Unknown"
-    except Exception:
-        pass
-
-    # 한국 종목 코드 패턴 확인 (.KS 또는 .KQ 접미사)
-    if ".KS" in ticker_symbol or ".KQ" in ticker_symbol:
-        country = "KR"
-    # 6자리 숫자만 있는 경우도 한국으로 추정 (예: 사용자가 '005930' 직접 입력)
-    elif ticker_symbol.replace(".KS", "").replace(".KQ", "").isdigit() and len(ticker_symbol.replace(".KS", "").replace(".KQ", "")) == 6:
-        country = "KR"
-
-    # 재무제표 3종 수집
-    result = {
-        "ticker": ticker_symbol,
-        "country": country,
-        "balance_sheet": None,
-        "income_statement": None,
-        "cash_flow": None
-    }
-
-    # 1. Balance Sheet (재무상태표)
-    try:
-        balance_sheet = ticker.balance_sheet
-        if balance_sheet is not None and not balance_sheet.empty:
-            result["balance_sheet"] = balance_sheet.to_json(orient="columns", date_format="iso")
-    except Exception as e:
-        print(f"Warning: Failed to fetch balance_sheet for {ticker_symbol}: {e}")
-
-    # 2. Income Statement (손익계산서)
-    try:
-        income_stmt = ticker.income_stmt
-        if income_stmt is not None and not income_stmt.empty:
-            result["income_statement"] = income_stmt.to_json(orient="columns", date_format="iso")
-    except Exception as e:
-        print(f"Warning: Failed to fetch income_stmt for {ticker_symbol}: {e}")
-
-    # 3. Cash Flow (현금흐름표)
-    try:
-        cashflow = ticker.cashflow
-        if cashflow is not None and not cashflow.empty:
-            result["cash_flow"] = cashflow.to_json(orient="columns", date_format="iso")
-    except Exception as e:
-        print(f"Warning: Failed to fetch cashflow for {ticker_symbol}: {e}")
-
-    return result
+    # 리팩토링된 Fundamentals 클래스 사용 (캐싱 포함)
+    return YahooFundamentals().fundamentals(query=query, use_cache=use_cache)
 
 @mcp.tool(
     name="save_fundamentals_data_to_gcs",
