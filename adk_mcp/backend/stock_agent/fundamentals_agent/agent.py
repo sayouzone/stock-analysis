@@ -225,11 +225,6 @@ class AnalysisResult(BaseModel):
     income_statement: str = Field(description="손익계산서 분석 - 매출, 비용, 영업이익, 순이익 추이 분석")
     cash_flow: str = Field(description="현금흐름표 분석 - 영업/투자/재무 활동 현금흐름 분석")
 
-class RatingResult(BaseModel):
-    score: int = Field(description="Numerical score from 1 to 100")
-    rate: str = Field(description="Qualitative rating: excellent, good, normal, warning")
-    justification: Optional[str] = Field(default=None, description="Short explanation for the rating")
-
 # --- JSON Formatter Agent to ensure valid JSON output ---
 json_formatter = LlmAgent(
     model=THINKING_MODEL,
@@ -512,10 +507,9 @@ async def call_agent_async(user_input_ticker: str):
     and runs the workflow.
 
     Returns:
-        tuple[str, str, dict | None]:
+        tuple[str, str]:
             - final natural-language response from the agent (if any)
             - JSON string representation of the final session state (uploaded to GCS)
-            - rating output from the rater agent as a dictionary, if produced
     """
 
     session_service, runner = await setup_session_and_runner(ticker=user_input_ticker)
@@ -566,13 +560,6 @@ async def call_agent_async(user_input_ticker: str):
     if final_response and final_response != "No final response captured.":
         final_state["agent_final_response"] = final_response
 
-    raw_rating = final_state.get("rating")
-    if hasattr(raw_rating, "model_dump"):
-        final_rating = raw_rating.model_dump()
-        final_state["rating"] = final_rating
-    else:
-        final_rating = raw_rating
-
     if run_error and not final_state.get("agent_run_error"):
         final_state["agent_run_error"] = run_error
 
@@ -607,7 +594,6 @@ async def call_agent_async(user_input_ticker: str):
                 "ticker": user_input_ticker,
                 "saved_at": saved_timestamp,
                 "analysis_result": final_state.get("analysis_result"),
-                "rating": final_rating,
                 "agent_final_response": final_state.get("agent_final_response"),
                 "agent_run_error": final_state.get("agent_run_error"),
             }
@@ -623,8 +609,5 @@ async def call_agent_async(user_input_ticker: str):
 
     final_result = json.dumps(final_state, indent=2, ensure_ascii=False, default=str)
     print(final_result)
-    if final_rating:
-        print("\nRating Result:")
-        print(json.dumps(final_rating, indent=2, ensure_ascii=False))
     print("-------------------------------\n")
-    return final_response, final_result, final_rating
+    return final_response, final_result

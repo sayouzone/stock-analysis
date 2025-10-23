@@ -17,17 +17,35 @@ mcp = FastMCP(name="StockFundamentalsServer")
 
 @mcp.tool(
     name="find_fnguide_data",
-    description="""FnGuide에서 한국 주식 재무제표 수집.
+    description="""FnGuide에서 한국 주식 재무제표 수집 (yfinance와 동일한 스키마).
     사용 대상:
     - 6자리 숫자 티커: 005930, 000660
     - .KS/.KQ 접미사: 005930.KS, 035720.KQ
     - 한국 기업명: 삼성전자, SK하이닉스
 
-    반환: 재무상태표, 포괄손익계산서, 현금흐름표 (연간 데이터)
+    반환: {
+        "ticker": str,
+        "country": "KR",
+        "balance_sheet": str | None,      # JSON 문자열
+        "income_statement": str | None,   # JSON 문자열
+        "cash_flow": str | None           # JSON 문자열
+    }
     """,
-    tags={"fnguide", "fundamentals", "korea"}
+    tags={"fnguide", "fundamentals", "korea", "standardized"}
 )
 def fetch_fnguide_data(stock: str):
+    """
+    FnGuide에서 한국 주식 재무제표 3종을 수집합니다.
+
+    yfinance와 동일한 스키마를 반환하여 LLM 에이전트가
+    한국 주식과 해외 주식을 동일한 방식으로 처리할 수 있습니다.
+
+    Args:
+        stock: 종목 코드 (예: "005930", "삼성전자")
+
+    Returns:
+        dict: 재무제표 3종 (yfinance와 동일한 스키마)
+    """
     crawler = FnGuideCrawler(stock=stock)
     return crawler.fundamentals()
 

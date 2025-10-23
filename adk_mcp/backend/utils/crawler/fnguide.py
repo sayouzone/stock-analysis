@@ -71,9 +71,9 @@ class FnGuideCrawler:
         *,
         use_cache: bool = False,
         overwrite: bool = True,
-    ) -> dict[str, list[dict]]:
+    ) -> dict[str, str | None]:
         """
-        모든 테이블 데이터를 JSON 형태로 반환 (GCS 캐싱/저장 포함)
+        재무제표 3종을 yfinance와 동일한 스키마로 반환 (GCS 캐싱/저장 포함)
 
         Args:
             stock: 종목 코드 (None이면 초기화 시 설정한 종목 사용)
@@ -81,7 +81,13 @@ class FnGuideCrawler:
             overwrite: False일 경우 기존 파일이 있으면 덮어쓰지 않음
 
         Returns:
-            dict[str, list[dict]]: 테이블명을 키로, 레코드 리스트를 값으로 하는 딕셔너리
+            dict: {
+                "ticker": str,
+                "country": str,
+                "balance_sheet": str | None,      # JSON 문자열
+                "income_statement": str | None,   # JSON 문자열
+                "cash_flow": str | None           # JSON 문자열
+            }
         """
         if stock:
             self.stock = stock
@@ -135,19 +141,19 @@ class FnGuideCrawler:
             )
 
         # 데이터 수집
-        result = {}
+        raw_data = {}
 
-        # 1. 정적 테이블 수집 (requests + pandas.read_html)
+        # 1. 정적 테이블 수집은 GCS에만 저장 (기존 호환성 유지)
         static_data = self._get_static_tables()
-        result.update(static_data)
+        raw_data.update(static_data)
 
         # 2. 동적 테이블 수집 (Playwright로 재무제표 3종)
         dynamic_data = self._get_dynamic_tables()
-        result.update(dynamic_data)
+        raw_data.update(dynamic_data)
 
         # 3. GCS 업로드용 CSV 페이로드 생성
         csv_payloads: dict[str, str] = {}
-        for name, records in result.items():
+        for name, records in raw_data.items():
             if records:  # 빈 리스트가 아닐 때만 CSV 변환
                 try:
                     df = pd.DataFrame(records)
@@ -168,12 +174,36 @@ class FnGuideCrawler:
             legacy_folder=legacy_folder,
         )
 
-        # 5. 세션 정보 추가 (기존 포맷 유지: 딕셔너리)
-        result['session_state'] = {
-            'ticker': self.stock,
-            'currency': 'KRW',
-            'source': 'fnguide'
+        # 5. yfinance와 동일한 스키마로 재무제표 3종만 반환
+        # FnGuide 한글 키명 → 영문 키명 매핑
+        result = {
+            "ticker": self.stock,
+            "country": "KR",
+            "balance_sheet": None,
+            "income_statement": None,
+            "cash_flow": None
         }
+
+        # 재무상태표 (포괄손익계산서 → income_statement)
+        if "포괄손익계산서" in dynamic_data and dynamic_data["포괄손익계산서"]:
+            result["income_statement"] = json.dumps(
+                dynamic_data["포괄손익계산서"],
+                ensure_ascii=False
+            )
+
+        # 재무상태표
+        if "재무상태표" in dynamic_data and dynamic_data["재무상태표"]:
+            result["balance_sheet"] = json.dumps(
+                dynamic_data["재무상태표"],
+                ensure_ascii=False
+            )
+
+        # 현금흐름표
+        if "현금흐름표" in dynamic_data and dynamic_data["현금흐름표"]:
+            result["cash_flow"] = json.dumps(
+                dynamic_data["현금흐름표"],
+                ensure_ascii=False
+            )
 
         return result
 
@@ -183,20 +213,26 @@ class FnGuideCrawler:
         *,
         use_cache: bool = False,
         overwrite: bool = True,
-    ) -> dict[str, list[dict]]:
+    ) -> dict[str, str | None]:
         """
         기존 시스템 호환성을 위한 별칭 메서드
 
         routers/fundamentals.py에서 호출하는 메서드명과 일치시키기 위한
         래퍼 메서드입니다. 내부적으로 get_all_fundamentals()를 호출합니다.
-        
+
         Args:
             stock: 종목 코드 (None이면 초기화 시 설정한 종목 사용)
             use_cache: True일 경우 GCS에서 캐시된 데이터 조회 시도
             overwrite: False일 경우 기존 파일이 있으면 덮어쓰지 않음
-        
+
         Returns:
-            dict[str, list[dict]]: 테이블명을 키로, 레코드 리스트를 값으로 하는 딕셔너리
+            dict: {
+                "ticker": str,
+                "country": str,
+                "balance_sheet": str | None,      # JSON 문자열
+                "income_statement": str | None,   # JSON 문자열
+                "cash_flow": str | None           # JSON 문자열
+            }
         """
         return self.get_all_fundamentals(
             stock=stock,
@@ -836,7 +872,7 @@ class _FnGuideTranslator:
 
 # ==================== 하위 호환성 함수 ====================
 
-def get_fnguide_fundamentals(company: str) -> dict[str, list[dict]]:
+def get_fnguide_fundamentals(company: str) -> dict[str, str | None]:
     """
     하위 호환성을 위한 래퍼 함수
 
@@ -846,12 +882,18 @@ def get_fnguide_fundamentals(company: str) -> dict[str, list[dict]]:
         company: 종목 코드 (6자리, 예: "005930")
 
     Returns:
-        dict[str, list[dict]]: 수집된 모든 테이블 데이터
+        dict: {
+            "ticker": str,
+            "country": str,
+            "balance_sheet": str | None,      # JSON 문자열
+            "income_statement": str | None,   # JSON 문자열
+            "cash_flow": str | None           # JSON 문자열
+        }
 
     Example:
         >>> data = get_fnguide_fundamentals("005930")
         >>> print(data.keys())
-        dict_keys(['market_conditions', 'earning_issue', ..., 'session_state'])
+        dict_keys(['ticker', 'country', 'balance_sheet', 'income_statement', 'cash_flow'])
     """
     crawler = FnGuideCrawler(stock=company)
     return crawler.get_all_fundamentals()
