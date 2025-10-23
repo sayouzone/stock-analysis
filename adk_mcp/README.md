@@ -11,8 +11,11 @@
 │   ├── routers             # fastapi 라우터
 │   ├── mcp_server          # ADK 에이전트의 유틸 호출을 위한 MCP 서버
 │   └── stock_agent         # ADK 에이전트
-│            
-├── old                     # 활용 예제들
+│       ├── fundamentals_agent # 펀더멘탈 분석(재무제표 정량적 분석) 에이전트
+│       ├── market_agent    # 주가 데이터 분석 에이전트
+│       └── data_agent      # 데이터 처리 에이전트(임시)
+├── old                     # 레거시 파일
+├── docs                    # 관련 문서
 ├── main.py
 └── README.md               # 설명 - 다양한 설명 (Repository overview)
 ```
