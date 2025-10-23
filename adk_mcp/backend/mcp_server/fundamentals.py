@@ -17,7 +17,7 @@ mcp = FastMCP(name="StockFundamentalsServer")
 
 @mcp.tool(
     name="find_fnguide_data",
-    description="""FnGuide에서 한국 주식 재무제표 수집 (yfinance와 동일한 스키마).
+    description="""FnGuide에서 한국 주식 재무제표 수집 (yfinance와 동일한 스키마, 캐시 사용).
     사용 대상:
     - 6자리 숫자 티커: 005930, 000660
     - .KS/.KQ 접미사: 005930.KS, 035720.KQ
@@ -30,10 +30,13 @@ mcp = FastMCP(name="StockFundamentalsServer")
         "income_statement": str | None,   # JSON 문자열
         "cash_flow": str | None           # JSON 문자열
     }
+
+    참고: 캐시를 우선 사용하여 빠른 응답을 제공합니다.
+    크롤링은 최대 60초 이상 소요될 수 있으므로 가능한 캐시를 활용합니다.
     """,
-    tags={"fnguide", "fundamentals", "korea", "standardized"}
+    tags={"fnguide", "fundamentals", "korea", "standardized", "cached"}
 )
-def fetch_fnguide_data(stock: str):
+async def fetch_fnguide_data(stock: str, use_cache: bool = True):
     """
     FnGuide에서 한국 주식 재무제표 3종을 수집합니다.
 
@@ -42,12 +45,17 @@ def fetch_fnguide_data(stock: str):
 
     Args:
         stock: 종목 코드 (예: "005930", "삼성전자")
+        use_cache: GCS 캐시 사용 여부 (기본값: True, 권장)
 
     Returns:
         dict: 재무제표 3종 (yfinance와 동일한 스키마)
+
+    Note:
+        - use_cache=True (기본값): GCS에서 캐시된 데이터를 먼저 확인 (빠름)
+        - use_cache=False: 항상 새로 크롤링 (느림, 30초+ 소요)
     """
     crawler = FnGuideCrawler(stock=stock)
-    return crawler.fundamentals()
+    return await crawler.fundamentals(use_cache=use_cache)
 
 
 @mcp.tool(

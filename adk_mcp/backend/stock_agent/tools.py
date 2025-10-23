@@ -62,7 +62,7 @@ fundamentals_mcp_tool = MCPToolset(
             command='fastmcp',
             args=['run', f"{_mcp_server_path}:mcp", "--project", str(_project_root)],
         ),
-        timeout=30,
+        timeout=90,  # FnGuide 크롤링은 최대 60초 소요, 여유 30초 추가
     ),
     tool_filter=[
         'find_fnguide_data',
