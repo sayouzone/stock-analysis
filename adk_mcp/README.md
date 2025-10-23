@@ -16,6 +16,7 @@
 │       └── data_agent      # 데이터 처리 에이전트(임시)
 ├── old                     # 레거시 파일
 ├── docs                    # 관련 문서
+├── prompt                  # 프롬프트 모음
 ├── main.py
 └── README.md               # 설명 - 다양한 설명 (Repository overview)
 ```

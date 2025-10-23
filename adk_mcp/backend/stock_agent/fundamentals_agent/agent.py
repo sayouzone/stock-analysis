@@ -21,7 +21,7 @@ from google.adk.utils.context_utils import Aclosing
 from pydantic import BaseModel, Field
 
 from tools import fundamentals_mcp_tool
-from fundamentals_agent.prompt import FUNDAMENTALS_FETCHER_INSTRUCTION
+from fundamentals_agent.prompt import fetch_fundamentals_prompt
 from google.adk.tools.set_model_response_tool import SetModelResponseTool
 from utils.gcpmanager import GCSManager
 
@@ -31,7 +31,7 @@ CURRENT_DATE = date.today().isoformat()
 CURRENT_DATE_LINE_KO = f"오늘 날짜는 {CURRENT_DATE}입니다."
 CURRENT_DATE_LINE_EN = f"Today's date is {CURRENT_DATE}."
 
-fundamentals_fetcher_instruction = f"{CURRENT_DATE_LINE_KO}\n\n{FUNDAMENTALS_FETCHER_INSTRUCTION}"
+fundamentals_fetcher_instruction = f"{CURRENT_DATE_LINE_KO}\n\n{fetch_fundamentals_prompt()}"
 
 # --- Runtime configuration (tunable via environment variables) ---
 FAST_MODE = os.getenv("FUNDAMENTALS_AGENT_FAST_MODE", "true").lower() == "true"
