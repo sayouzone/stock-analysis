@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 import sys
 from pathlib import Path
 
-# Add backend directory to sys.path for imports
+# 임포트를 위해 backend 디렉토리를 sys.path에 추가
 _backend_dir = Path(__file__).resolve().parent.parent.parent
 if str(_backend_dir) not in sys.path:
     sys.path.insert(0, str(_backend_dir))
@@ -35,76 +35,45 @@ from utils.gcpmanager import GCSManager
 
 os.getenv("GOOGLE_API_KEY")
 
+#LLM 프롬프트에 오늘 날짜 명시
 CURRENT_DATE = date.today().isoformat()
 CURRENT_DATE_LINE_KO = f"오늘 날짜는 {CURRENT_DATE}입니다."
 CURRENT_DATE_LINE_EN = f"Today's date is {CURRENT_DATE}."
 
 fundamentals_fetcher_instruction = f"{CURRENT_DATE_LINE_KO}\n\n{fetch_fundamentals_prompt()}"
 
-# --- Runtime configuration (tunable via environment variables) ---
-FAST_MODE = os.getenv("FUNDAMENTALS_AGENT_FAST_MODE", "true").lower() == "true"
-DEFAULT_THINKING_MODEL = "gemini-2.5-flash" if FAST_MODE else "gemini-2.5-pro"
-THINKING_MODEL = os.getenv("FUNDAMENTALS_THINKING_MODEL", DEFAULT_THINKING_MODEL)
+# Gemini 모델 구분
+FLASH_MODEL = "gemini-2.5-flash"
+PRO_MODEL = "gemini-2.5-pro"
 
-
-def _supports_thinking(model_name: str) -> bool:
-    overridden = os.getenv("FUNDAMENTALS_FORCE_THINKING")
-    if overridden:
-        return overridden.lower() in {"1", "true", "yes", "on"}
-    name = model_name.lower()
-    if "flash" in name and "thinking" not in name:
-        return False
-    return True
-
-
-SUPPORTS_THINKING = _supports_thinking(THINKING_MODEL)
-
-if FAST_MODE:
-    DEFAULT_ANALYST_BUDGET = "256"
-    DEFAULT_REVIEWER_BUDGET = "192"
-    DEFAULT_REVISER_BUDGET = "192"
-    DEFAULT_RATER_BUDGET = "128"
-    DEFAULT_REVIEW_LOOPS = "0"
-else:
-    DEFAULT_ANALYST_BUDGET = "1024"
-    DEFAULT_REVIEWER_BUDGET = "512"
-    DEFAULT_REVISER_BUDGET = "512"
-    DEFAULT_RATER_BUDGET = "512"
-    DEFAULT_REVIEW_LOOPS = "3"
-
-if SUPPORTS_THINKING:
-    ANALYST_THINKING_BUDGET = int(os.getenv("FUNDAMENTALS_ANALYST_THINKING_BUDGET", DEFAULT_ANALYST_BUDGET))
-    REVIEWER_THINKING_BUDGET = int(os.getenv("FUNDAMENTALS_REVIEWER_THINKING_BUDGET", DEFAULT_REVIEWER_BUDGET))
-    REVISER_THINKING_BUDGET = int(os.getenv("FUNDAMENTALS_REVISER_THINKING_BUDGET", DEFAULT_REVISER_BUDGET))
-    RATER_THINKING_BUDGET = int(os.getenv("FUNDAMENTALS_RATER_THINKING_BUDGET", DEFAULT_RATER_BUDGET))
-else:
-    ANALYST_THINKING_BUDGET = 0
-    REVIEWER_THINKING_BUDGET = 0
-    REVISER_THINKING_BUDGET = 0
-    RATER_THINKING_BUDGET = 0
-
-REVIEW_LOOP_MAX_ITERATIONS = int(os.getenv("FUNDAMENTALS_REVIEW_MAX_ITERATIONS", DEFAULT_REVIEW_LOOPS))
-
-# --- Constants ---
+# --- 상수 정의 ---
 APP_NAME = "fundamentals_analysis_app"
 USER_ID = "12345"
 SESSION_ID = "123344"
 
-# --- Configure Logging ---
+# --- 로깅 설정 ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
+# None 값을 가진 키를 딕셔너리에서 제거하는 함수
 def _strip_none(data: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in data.items() if value is not None}
 
-
+# 추후 Cloud Storage -> BigQuery 로 수정, 함수 이름 변경
 def _upload_json_payload(
     gcs_manager: GCSManager,
     *,
     blob_name: str,
     payload: dict[str, Any],
 ) -> bool:
+    """
+    주어진 페이로드를 Google Cloud Storage에 업로드합니다.
+    
+    Args:
+        gcs_manager: GCSManager 인스턴스.
+        blob_name: 업로드될 파일의 블롭 이름(예: "Fundamentals/005930.json").
+        payload: 업로드할 JSON 데이터 (dict).
+    """
     try:
         serialized = json.dumps(payload, ensure_ascii=False, default=str)
     except Exception as exc:  # pragma: no cover - defensive logging
@@ -117,6 +86,8 @@ def _upload_json_payload(
         encoding="utf-8",
         content_type="application/json; charset=utf-8",
     )
+
+# 추후 Cloud Storage -> BigQuery 로 수정
 def _upload_to_destinations(
     gcs_manager: GCSManager,
     *,
@@ -145,7 +116,12 @@ def _upload_to_destinations(
 
 
 def _fallback_fundamentals_data(ticker: str, message: str) -> dict[str, str]:
-    """재무제표 3종만 포함하는 폴백 데이터"""
+    """
+    디버깅 목적으류 재무제표 3종만 포함하는 폴백 데이터
+    Args:
+        ticker: 분석 대상 티커
+        message: 원본 메시지
+    """
     fallback_message = (message[:480] + "…") if len(message) > 480 else message
     return {
         "ticker": ticker or "",
@@ -156,6 +132,14 @@ def _fallback_fundamentals_data(ticker: str, message: str) -> dict[str, str]:
     }
 
 def _normalize_fundamentals_payload(value: Any, *, ticker: str) -> dict[str, Any]:
+    """
+    LLM이 반한하는 출력값 정규화 함수
+    Args:
+        value: 출력(분석) 결과
+        ticker: 분석 대상 티커
+    Return: 정규화된 출력 결과
+    Raises: JSON 파싱 실패, 
+    """
     if value is None:
         return _fallback_fundamentals_data(ticker, "펀더멘털 데이터를 생성하지 못했습니다.")
     if isinstance(value, str):
@@ -194,21 +178,6 @@ def _normalize_fundamentals_payload(value: Any, *, ticker: str) -> dict[str, Any
         elif not isinstance(merged[key], str):
             merged[key] = str(merged[key])
     return merged
-
-
-def _make_planner(thinking_budget: int | None) -> BuiltInPlanner | None:
-    if not SUPPORTS_THINKING:
-        return None
-    if not thinking_budget or thinking_budget <= 0:
-        return None
-    return BuiltInPlanner(
-        thinking_config=types.ThinkingConfig(
-            include_thoughts=True,
-            thinking_budget=thinking_budget,
-        ),
-    )
-
-
 class FundamentalsData(BaseModel):
     """재무제표 3종만 포함하는 기본 데이터 모델"""
     ticker: str = Field(description="The stock ticker symbol of the company.")
@@ -225,9 +194,9 @@ class AnalysisResult(BaseModel):
     income_statement: str = Field(description="손익계산서 분석 - 매출, 비용, 영업이익, 순이익 추이 분석")
     cash_flow: str = Field(description="현금흐름표 분석 - 영업/투자/재무 활동 현금흐름 분석")
 
-# --- JSON Formatter Agent to ensure valid JSON output ---
+# 최종 분석 결과를 JSON으로 포맷팅하는 에이전트
 json_formatter = LlmAgent(
-    model=THINKING_MODEL,
+    model=PRO_MODEL,
     name="JsonFormatter",
     instruction=(
         f"{CURRENT_DATE_LINE_EN}\n"
@@ -243,15 +212,11 @@ json_formatter = LlmAgent(
 async def run_json_formatter_callback(
     *, callback_context: CallbackContext
 ) -> Optional[types.Content]:
-    """Runs the json_formatter agent and returns its final content.
-
-    The callback mirrors BaseAgent.after_agent_callback contract by using the
-    existing invocation context, copying any state updates produced by the
-    formatter, and returning the formatter's final response so that it becomes
-    the agent reply.
+    """
+    json_formatter 에이전트를 실행하고 최종 콘텐츠를 반환합니다.
     """
 
-    # Nothing to format when the intermediate result is missing.
+    # 중간 결과가 없으면 포맷팅할 내용이 없습니다.
     current_result = callback_context.state.get("analysis_result")
     if not current_result:
         return None
@@ -301,18 +266,18 @@ class FundamentalsAnalysisAgent(BaseAgent):
 
         Args:
             name: The name of the agent.
-            analyst: An LlmAgent to analyze the fundamentals of a company.
-            reviewer: An LlmAgent to review the analysis result.
-            reviser: An LlmAgent to revise the analysis result based on commentary.
-            rater: An LlmAgent to score the final analysis outcome.
-            json_formatter: An LlmAgent to enforce JSON formatting on outputs.
+            fundamentals_fetcher: 펀더멘털 데이터를 가져오는 에이전트.
+            analyst: 회사의 펀더멘털을 분석하는 에이전트.
+            reviewer: 분석 결과를 리뷰하는 에이전트.
+            reviser: 리뷰를 기반으로 분석을 개선하는 에이전트
+            json_formatter: 최종 결과물을 JSON으로 포맷팅하는 에이전트.
         """
 
-        # Create internal agents *before* calling super().__init__
+        # super().__init__을 호출하기 *전에* 내부 에이전트를 생성합니다
         loop_agent = LoopAgent(
             name="ReviewerReviserLoop",
             sub_agents=[reviewer, reviser],
-            max_iterations=REVIEW_LOOP_MAX_ITERATIONS,
+            max_iterations=2,
         )
 
         sub_agents_list = [
@@ -349,7 +314,7 @@ class FundamentalsAnalysisAgent(BaseAgent):
             logger.info(f"[{self.name}] Event from FundamentalsFetcher: {event.model_dump_json(indent=2, exclude_none=True)}")
             yield event
 
-        # Check if fundamentals data before proceeding
+        # 계속 진행하기 전에 펀더멘털 데이터가 있는지 확인합니다
         if "fundamentals_data" not in ctx.session.state or not ctx.session.state["fundamentals_data"]:
             logger.warning(f"[{self.name}] No fundamentals_data found in context after FundamentalsFetcher. Exiting.")
             return
@@ -362,20 +327,20 @@ class FundamentalsAnalysisAgent(BaseAgent):
 
         logger.info(f"[{self.name}]")
 
-        # 2. Initial Analysis
+        # 2. 초기 분석
         logger.info(f"[{self.name}] Running Analyst...")
         async for event in self.analyst.run_async(ctx):
             logger.info(f"[{self.name}] Event from Analyst: {event.model_dump_json(indent=2, exclude_none=True)}")
             yield event
         
-        # Check if analysis result before proceeding
+        # 계속 진행하기 전에 분석 결과가 있는지 확인합니다
         if "analysis_result" not in ctx.session.state or not ctx.session.state["analysis_result"]:
             logger.warning(f"[{self.name}] No analysis_result found in context after Analyst. Exiting.")
             return
         
         logger.info(f"[{self.name}]")
 
-        # 3. Review and Revise Loop (optional)
+        # 3. 리뷰 및 수정 루프 (선택 사항)
         if self.loop_agent.max_iterations > 0:
             logger.info(f"[{self.name}] Running ReviewerReviserLoop (max_iterations={self.loop_agent.max_iterations})...")
             async for event in self.loop_agent.run_async(ctx):
@@ -389,8 +354,9 @@ class FundamentalsAnalysisAgent(BaseAgent):
 # 웹 검색 도구 제거 - fundamentals_mcp_tool만 사용
 _FETCHER_TOOLS: List[Any] = [fundamentals_mcp_tool]
 
+# 필요한 펀더멘털 데이터를 가져오는 에이전트
 fundamentals_fetcher = LlmAgent(
-    model = "gemini-2.5-flash",
+    model = FLASH_MODEL,
     name = "FundamentalsFetcher",
     description="""
     Fetches comprehensive fundamentals data for a specified stock ticker and country.
@@ -403,8 +369,7 @@ fundamentals_fetcher = LlmAgent(
 )
 
 analyst = LlmAgent(
-    model=THINKING_MODEL,
-    planner=_make_planner(ANALYST_THINKING_BUDGET),
+    model=PRO_MODEL,
     name="Analyst",
     tools=[SetModelResponseTool(AnalysisResult)],
     instruction=(
@@ -441,8 +406,7 @@ analyst = LlmAgent(
 
 
 reviewer = LlmAgent(
-    model=THINKING_MODEL,
-    planner=_make_planner(REVIEWER_THINKING_BUDGET),
+    model=PRO_MODEL,
     name="Reviewer",
     instruction=(
         f"{CURRENT_DATE_LINE_EN}\n"
@@ -459,8 +423,7 @@ reviewer = LlmAgent(
 )
 
 reviser = LlmAgent(
-    model=THINKING_MODEL,
-    planner=_make_planner(REVISER_THINKING_BUDGET),
+    model=PRO_MODEL,
     name="Reviser",
     instruction=(
         f"{CURRENT_DATE_LINE_EN}\n"
@@ -490,6 +453,7 @@ fundamentals_analysis_agent = FundamentalsAnalysisAgent(
 root_agent = fundamentals_analysis_agent
 
 async def setup_session_and_runner(ticker: str):
+    # ADK 세션, 러너 설정을 위한 함수
     session_service = InMemorySessionService()
     initial_state = {"ticker": ticker}
     session = await session_service.create_session(app_name=APP_NAME, user_id=USER_ID, session_id=SESSION_ID, state=initial_state)
@@ -542,20 +506,6 @@ async def call_agent_async(user_input_ticker: str):
         final_state = dict(session_state)
     else:
         final_state = dict(session_state.items()) if session_state else {}
-    def _to_serializable(value):
-        if hasattr(value, "model_dump"):
-            return _to_serializable(value.model_dump())
-        if isinstance(value, dict):
-            return {k: _to_serializable(v) for k, v in value.items()}
-        if isinstance(value, (list, tuple, set)):
-            return [_to_serializable(v) for v in value]
-        if isinstance(value, (datetime, date)):
-            return value.isoformat()
-        if isinstance(value, Decimal):
-            return float(value)
-        return value
-
-    final_state = _to_serializable(final_state)
 
     if final_response and final_response != "No final response captured.":
         final_state["agent_final_response"] = final_response
