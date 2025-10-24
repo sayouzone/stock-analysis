@@ -4,6 +4,42 @@
 
 주식 투자에 대해 정보 수집 및 분석하는 서비스를 구축하는 방법에 대해 알아보겠습니다. FastAPI, yfinance, 웹 크롤링, LLM 분석, MCP 서버 구축 및 Agentic AI 아키텍처를 활용한 종합적인 접근 방식을 다룹니다. LLM은 기본적으로 Gemini Pro 2.5를 사용하며 상황에 따라 GPT-5를 활용하고 있습니다. 추후 Claude 및 Llama 4.0, Mistral, DeepSeek도 활용할 예정입니다.
 
+폴더 구성은 아래와 같습니다.
+
+```tree
+├── adk_mcp                     # ADK 기반 Agent + MCP 모델
+│   ├── frontend                # 프론트엔드             
+│   ├── backend                 # 백엔드
+│   │   ├── utils               # 유틸리티(크롤링)
+│   │   ├── routers             # fastapi 라우터
+│   │   ├── mcp_server          # ADK 에이전트의 유틸 호출을 위한 MCP 서버
+│   │   └── stock_agent         # ADK 에이전트
+│   │       ├── fundamentals_agent # 펀더멘탈 분석(재무제표 정성적 분석) 에이전트
+│   │       ├── market_agent    # 주가 데이터 분석 에이전트
+│   │       └── data_agent      # 데이터 처리 에이전트(임시)
+│   ├── old                     # 레거시 파일
+│   ├── docs                    # 관련 문서
+│   ├── prompt                  # 프롬프트 모음
+│   ├── main.py
+│   └── README.md               # 설명 - 다양한 설명 (Repository overview)
+├── base                        # Web & REST API & Ajax 아키텍처
+│   ├── frontend                # 프론트엔드             
+│   ├── jupyter                 # Jupyter Notebook 파일
+│   ├── old                     # 레거시 파일
+│   ├── routers                 # Fastapi 라우터
+│   ├── utils                   # 유틸리티(크롤링)
+│   ├── docs                    # 관련 문서
+│   ├── Dockerfile
+│   ├── cloudbuild.yaml         # Google Cloud Build 설정
+│   ├── main.py
+│   ├── requirements.txt
+│   └── README.md               # 설명 - 다양한 설명 (Repository overview)
+└── multi-agents                # Multi-Agents 모델 (추후 개발 예정)
+│   └── README.md               # 설명 - 다양한 설명 (Repository overview)
+├── LICENSE                     # 라이선스 정책
+└── README.md                   # 설명 - 다양한 설명 (Repository overview)
+```
+
 **Web & REST API & Ajax 아키텍처**
 
 ![기본 구조](https://www.sayouzone.com/resource/images/blog/stock_analysis_basis.png)

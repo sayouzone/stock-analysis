@@ -7,6 +7,23 @@ LLM(Large Language Model)으로 뉴스 기사, 댓글 등을 요약하거나 분
 
 ![기본 구조](https://www.sayouzone.com/resource/images/blog/stock_analysis_basis.png)
 
+```tree
+├── frontend                # 프론트엔드
+│   ├── src                 # TypeScript 폴더
+│   ├── index.html          # 메인 HTML 파일
+│   └── tsconfig.json       # TypeScript 설정 파일
+├── jupyter                 # Jupyter Notebook 폴더
+├── old                     # 레거시 파일
+├── routers                 # Fastapi 라우터
+├── utils                   # 유틸리티(크롤링)
+├── docs                    # 관련 문서
+├── Dockerfile
+├── cloudbuild.yaml         # Google Cloud Build 설정
+├── main.py
+├── requirements.txt
+└── README.md               # 설명 - 다양한 설명 (Repository overview)
+```
+
 ## 설정
 
 cloudbuild.yaml 파일
