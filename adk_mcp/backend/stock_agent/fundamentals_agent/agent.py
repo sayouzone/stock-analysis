@@ -1,8 +1,6 @@
 import os
 import json
-from copy import deepcopy
 from datetime import date, datetime, timezone
-from decimal import Decimal
 
 import logging
 
@@ -35,7 +33,7 @@ from utils.gcpmanager import GCSManager
 
 os.getenv("GOOGLE_API_KEY")
 
-#LLM 프롬프트에 오늘 날짜 명시
+# LLM 프롬프트에 오늘 날짜 명시
 CURRENT_DATE = date.today().isoformat()
 CURRENT_DATE_LINE_KO = f"오늘 날짜는 {CURRENT_DATE}입니다."
 CURRENT_DATE_LINE_EN = f"Today's date is {CURRENT_DATE}."
@@ -45,6 +43,8 @@ fundamentals_fetcher_instruction = f"{CURRENT_DATE_LINE_KO}\n\n{fetch_fundamenta
 # Gemini 모델 구분
 FLASH_MODEL = "gemini-2.5-flash"
 PRO_MODEL = "gemini-2.5-pro"
+
+_FETCHER_TOOLS: List[Any] = [fundamentals_mcp_tool]
 
 # --- 상수 정의 ---
 APP_NAME = "fundamentals_analysis_app"
@@ -60,14 +60,14 @@ def _strip_none(data: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in data.items() if value is not None}
 
 # 추후 Cloud Storage -> BigQuery 로 수정, 함수 이름 변경
-def _upload_json_payload(
+def _upload_gcs_json_payload(
     gcs_manager: GCSManager,
     *,
     blob_name: str,
     payload: dict[str, Any],
 ) -> bool:
     """
-    주어진 페이로드를 Google Cloud Storage에 업로드합니다.
+    주어진 페이로드를 JSON으로 변환해 Google Cloud Storage에 업로드합니다.
     
     Args:
         gcs_manager: GCSManager 인스턴스.
@@ -111,13 +111,11 @@ def _upload_to_destinations(
         # 경로 맨 앞에 있을 수 있는 슬래시 제거
         blob_name = blob_name.lstrip('/')
 
-        _upload_json_payload(gcs_manager, blob_name=blob_name, payload=payload)
+        _upload_gcs_json_payload(gcs_manager, blob_name=blob_name, payload=payload)
 
-
-
-def _fallback_fundamentals_data(ticker: str, message: str) -> dict[str, str]:
+def _fallback_fundamentals_payload(ticker: str, message: str) -> dict[str, str]:
     """
-    디버깅 목적으류 재무제표 3종만 포함하는 폴백 데이터
+    디버깅 목적으로 재무제표 3종만 포함하는 폴백 데이터
     Args:
         ticker: 분석 대상 티커
         message: 원본 메시지
@@ -133,7 +131,10 @@ def _fallback_fundamentals_data(ticker: str, message: str) -> dict[str, str]:
 
 def _normalize_fundamentals_payload(value: Any, *, ticker: str) -> dict[str, Any]:
     """
-    LLM이 반한하는 출력값 정규화 함수
+    LLM이 가져오는 펀더멘털 데이터를 일정한 구조로 변환하는 함수.
+    str -> JSON
+    None, list, tuple, set, dict -> Fallback JSON
+
     Args:
         value: 출력(분석) 결과
         ticker: 분석 대상 티커
@@ -141,7 +142,7 @@ def _normalize_fundamentals_payload(value: Any, *, ticker: str) -> dict[str, Any
     Raises: JSON 파싱 실패, 
     """
     if value is None:
-        return _fallback_fundamentals_data(ticker, "펀더멘털 데이터를 생성하지 못했습니다.")
+        return _fallback_fundamentals_payload(ticker, "펀더멘털 데이터를 생성하지 못했습니다.")
     if isinstance(value, str):
         # LLM이 반환하는 마크다운 형식의 JSON 문자열(```json ... ```)을 정리한다.
         clean_value = value.strip()
@@ -154,22 +155,22 @@ def _normalize_fundamentals_payload(value: Any, *, ticker: str) -> dict[str, Any
             parsed = json.loads(clean_value)
         except json.JSONDecodeError:
             # 파싱 실패 시 원본 문자열로 폴백 데이터를 생성한다.
-            return _fallback_fundamentals_data(ticker, value)
+            return _fallback_fundamentals_payload(ticker, value)
         
         if not isinstance(parsed, dict):
-            return _fallback_fundamentals_data(ticker, str(parsed))
+            return _fallback_fundamentals_payload(ticker, str(parsed))
         value = parsed
 
     if isinstance(value, (list, tuple, set)):
-        return _fallback_fundamentals_data(ticker, str(list(value)))
+        return _fallback_fundamentals_payload(ticker, str(list(value)))
     if not isinstance(value, dict):
-        return _fallback_fundamentals_data(ticker, str(value))
+        return _fallback_fundamentals_payload(ticker, str(value))
 
     merged: dict[str, Any] = {**value}
     merged["ticker"] = ticker or str(merged.get("ticker", ""))
     merged.setdefault("country", "Unknown")
 
-    defaults = _fallback_fundamentals_data(merged["ticker"], "데이터가 제공되지 않았습니다.")
+    defaults = _fallback_fundamentals_payload(merged["ticker"], "데이터가 제공되지 않았습니다.")
     for key, fallback in defaults.items():
         if key == "ticker":
             continue
@@ -178,16 +179,24 @@ def _normalize_fundamentals_payload(value: Any, *, ticker: str) -> dict[str, Any
         elif not isinstance(merged[key], str):
             merged[key] = str(merged[key])
     return merged
-class FundamentalsData(BaseModel):
-    """재무제표 3종만 포함하는 기본 데이터 모델"""
+class Fundamentals(BaseModel):
+    # 기본 재무제표 스키마
+    ticker: str = Field(description="The stock ticker symbol of the company.")
+    country: str = Field(description="The country where the company is listed.")
+    balance_sheet: str
+    income_statement: str
+    cash_flow: str
+
+class FundamentalsData(Fundamentals):
+    # 재무제표 3종만 포함하는 기본 데이터 모델
     ticker: str = Field(description="The stock ticker symbol of the company.")
     country: str = Field(description="The country where the company is listed.")
     balance_sheet: Optional[str] = Field(default=None, description="The company's balance sheet data (재무상태표).")
     income_statement: Optional[str] = Field(default=None, description="The company's income statement data (손익계산서).")
     cash_flow: Optional[str] = Field(default=None, description="The company's cash flow statement data (현금흐름표).")
     
-class AnalysisResult(BaseModel):
-    """재무제표 3종에 대한 분석 결과 모델"""
+class AnalysisResult(Fundamentals):
+    # 재무제표 3종에 대한 분석 결과 모델
     ticker: str = Field(description="The stock ticker symbol of the company.")
     country: str = Field(description="The country where the company is listed.")
     balance_sheet: str = Field(description="재무상태표 분석 - 자산, 부채, 자본 구조 및 건전성 평가")
@@ -213,7 +222,7 @@ async def run_json_formatter_callback(
     *, callback_context: CallbackContext
 ) -> Optional[types.Content]:
     """
-    json_formatter 에이전트를 실행하고 최종 콘텐츠를 반환합니다.
+    json_formatter 에이전트를 실행하고 최종 JSON 콘텐츠를 반환합니다.
     """
 
     # 중간 결과가 없으면 포맷팅할 내용이 없습니다.
@@ -352,9 +361,19 @@ class FundamentalsAnalysisAgent(BaseAgent):
         logger.info(f"[{self.name}] Completed all steps.")
 
 # 웹 검색 도구 제거 - fundamentals_mcp_tool만 사용
-_FETCHER_TOOLS: List[Any] = [fundamentals_mcp_tool]
 
-# 필요한 펀더멘털 데이터를 가져오는 에이전트
+
+"""
+fundamentals_fetcher 에이전트 정의
+외부에서 회사의 펀더멘털 데이터를 가져오는 에이전트
+Args:
+    model: LLM 모델(Gemini-2.5-Flash)
+    name: 에이전트 이름
+    description: 외부에 에이전트를 설명
+    instruction: 에이전트 지침(프롬프트)
+    output_key: 에이전트의 출력값 키
+    tools: 펀더멘털 데이터를 가져오는 도구(MCP)
+"""
 fundamentals_fetcher = LlmAgent(
     model = FLASH_MODEL,
     name = "FundamentalsFetcher",
@@ -368,6 +387,16 @@ fundamentals_fetcher = LlmAgent(
     disallow_transfer_to_peers=True
 )
 
+"""
+analyst 에이전트
+재무제표 테이블 3종을 1차로 분석을 담당하는 에이전트.
+Args:
+    model: LLM 모델(Gemini-2.5-Pro)
+    name: 에이전트 이름
+    instruction: 에이전트 지침(프롬프트)
+    input_schema: 입력 스키마
+    output_key: 에이전트의 출력값 키
+"""
 analyst = LlmAgent(
     model=PRO_MODEL,
     name="Analyst",
@@ -404,7 +433,16 @@ analyst = LlmAgent(
     after_agent_callback=run_json_formatter_callback
 )
 
-
+"""
+reviewer 에이전트
+analysis 에이전트의 1차 분석을 평가하는 에이전트.
+Args:
+    model: LLM 모델(Gemini-2.5-Pro)
+    name: 에이전트 이름
+    instruction: 에이전트 지침(프롬프트)
+    input_schema: 입력 스키마
+    output_key: 에이전트의 출력값 키
+"""
 reviewer = LlmAgent(
     model=PRO_MODEL,
     name="Reviewer",
@@ -421,7 +459,15 @@ reviewer = LlmAgent(
     input_schema=AnalysisResult,
     output_key="review_comments"
 )
-
+"""
+reviser 에이전트
+reviewer 에이전트의 리뷰를 기반으로 분석을 개선하는 에이전트.
+Args:
+    model: LLM 모델(Gemini-2.5-Pro)
+    name: 에이전트 이름
+    instruction: 에이전트 지침(프롬프트)
+    input_schema: 입력 스키마
+"""
 reviser = LlmAgent(
     model=PRO_MODEL,
     name="Reviser",
@@ -439,7 +485,7 @@ reviser = LlmAgent(
     output_key="analysis_result",
     after_agent_callback=run_json_formatter_callback
 )
-
+# ADK 세션에서 에이전트 사용을 위한 변수 생성
 fundamentals_analysis_agent = FundamentalsAnalysisAgent(
     name="FundamentalsAnalysisAgent",
     fundamentals_fetcher=fundamentals_fetcher,
@@ -449,7 +495,7 @@ fundamentals_analysis_agent = FundamentalsAnalysisAgent(
     json_formatter=json_formatter,
 )
 
-# FastMCP 및 ADK 로더가 찾을 수 있도록 루트 에이전트 별칭을 노출한다.
+# FastMCP 및 ADK 로더가 찾을 수 있도록 루트 에이전트 별칭을 노출
 root_agent = fundamentals_analysis_agent
 
 async def setup_session_and_runner(ticker: str):
@@ -467,23 +513,24 @@ async def setup_session_and_runner(ticker: str):
 
 async def call_agent_async(user_input_ticker: str):
     """
-    Sends a new topic to the agent (overwriting the initial one if needed)
-    and runs the workflow.
+    에이전트에게 종목 티커를 보내 펀더멘털 분석 값을 가져오는 함수
 
     Returns:
         tuple[str, str]:
             - final natural-language response from the agent (if any)
             - JSON string representation of the final session state (uploaded to GCS)
     """
-
+    # 에이전트 세션 시작
     session_service, runner = await setup_session_and_runner(ticker=user_input_ticker)
 
+    # ADK event
     content = types.Content(role='user', parts=[types.Part(text=f"Analysis a stock about: {user_input_ticker}")])
     events = runner.run_async(user_id=USER_ID, session_id=SESSION_ID, new_message=content)
 
     final_response = "No final response captured."
     run_error: str | None = None
 
+    # 최종 결과값 리턴
     try:
         async for event in events:
             if event.is_final_response() and event.content and event.content.parts:
