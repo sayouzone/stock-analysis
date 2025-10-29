@@ -46,9 +46,81 @@ Backend 응답:
 ```
 ## 배포
 
-## 테스트
+## 로컬 테스트
+
+#### ADK 테스트
+
+```bash
+source .venv/bin/activate
+```
+
+```bash
+pip install pandas fastmcp lxml playwright beautifulsoup4 yfinance uv
+```
+
+```bash
+cd adk_mcp/backend/stock_agent
+```
+
+mcp server stdio 테스트
+
+```bash
+fastmcp run backend/mcp_server/server.py:mcp --project ../../adk_mcp
+```
+
+정상 동작 화면
+
+```bash
+
+                                                                 ╭──────────────────────────────────────────────────────────────────────────────╮
+                                                                 │                                                                              │
+                                                                 │                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+                                                                 │                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+                                                                 │                                                                              │
+                                                                 │                               FastMCP 2.13.0.2                               │
+                                                                 │                                                                              │
+                                                                 │                                                                              │
+                                                                 │                   🖥  Server name: StockFundamentalsServer                   │
+                                                                 │                                                                              │
+                                                                 │                   📦 Transport:   STDIO                                      │
+                                                                 │                                                                              │
+                                                                 │                   📚 Docs:        https://gofastmcp.com                      │
+                                                                 │                   🚀 Hosting:     https://fastmcp.cloud                      │
+                                                                 │                                                                              │
+                                                                 ╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[10/29/25 18:02:48] INFO     Starting MCP server 'StockFundamentalsServer' with transport 'stdio'  
+```
+
+```bash
+export GOOGLE_API_KEY=[API_KEY]
+adk web
+```
+
+정상 동작 화면
+
+```bash
+/Users/seongjungkim/Development/sayouzone/.venv/lib/python3.11/site-packages/google/adk/cli/fast_api.py:130: UserWarning: [EXPERIMENTAL] InMemoryCredentialService: This feature is experimental and may change or be removed in future versions without notice. It may introduce breaking changes at any time.
+  credential_service = InMemoryCredentialService()
+/Users/seongjungkim/Development/sayouzone/.venv/lib/python3.11/site-packages/google/adk/auth/credential_service/in_memory_credential_service.py:33: UserWarning: [EXPERIMENTAL] BaseCredentialService: This feature is experimental and may change or be removed in future versions without notice. It may introduce breaking changes at any time.
+  super().__init__()
+INFO:     Started server process [26390]
+INFO:     Waiting for application startup.
+
++-----------------------------------------------------------------------------+
+| ADK Web Server started                                                      |
+|                                                                             |
+
+| For local testing, access at http://127.0.0.1:8000.                         |
++-----------------------------------------------------------------------------+
+
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+```
 
 ## 오류
+
 ```
 ValueError: No root_agent found for 'stock_agent'. Searched in 'stock_agent.agent.root_agent', 'stock_agent.root_agent' and 'stock_agent/root_agent.yaml'. Ensure '/Users/kimchan-woo/Desktop/sayouzone/stock-analysis/stock-analysis/adk_mcp/stock_agent' is structured correctly, an .env file can be loaded if present, and a root_agent is exposed.
 ```

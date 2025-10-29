@@ -27,7 +27,7 @@ if str(_backend_dir) not in sys.path:
     sys.path.insert(0, str(_backend_dir))
 
 from tools import fundamentals_mcp_tool
-from fundamentals_agent.prompt import fetch_fundamentals_prompt
+from fundamentals_agent.prompt import fetch_fundamentals_prompt, fetch_fundamentals_prompt_from_string
 from google.adk.tools.set_model_response_tool import SetModelResponseTool
 from utils.gcpmanager import GCSManager
 
@@ -38,7 +38,8 @@ CURRENT_DATE = date.today().isoformat()
 CURRENT_DATE_LINE_KO = f"오늘 날짜는 {CURRENT_DATE}입니다."
 CURRENT_DATE_LINE_EN = f"Today's date is {CURRENT_DATE}."
 
-fundamentals_fetcher_instruction = f"{CURRENT_DATE_LINE_KO}\n\n{fetch_fundamentals_prompt()}"
+#fundamentals_fetcher_instruction = f"{CURRENT_DATE_LINE_KO}\n\n{fetch_fundamentals_prompt()}"
+fundamentals_fetcher_instruction = f"{CURRENT_DATE_LINE_KO}\n\n{fetch_fundamentals_prompt_from_string()}"
 
 # Gemini 모델 구분
 FLASH_MODEL = "gemini-2.5-flash"
@@ -318,6 +319,7 @@ class FundamentalsAnalysisAgent(BaseAgent):
         """
         logger.info(f"[{self.name}]")
 
+        # 펀더멘털 데이터 수집 (FundamentalsFetcher)
         logger.info(f"[{self.name}] Running FundamentalsFetcher...")
         async for event in self.fundamentals_fetcher.run_async(ctx):
             logger.info(f"[{self.name}] Event from FundamentalsFetcher: {event.model_dump_json(indent=2, exclude_none=True)}")
