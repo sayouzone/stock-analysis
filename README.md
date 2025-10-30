@@ -34,10 +34,10 @@
 │   ├── main.py
 │   ├── requirements.txt
 │   └── README.md               # 설명 - 다양한 설명 (Repository overview)
-└── multi-agents                # Multi-Agents 모델 (추후 개발 예정)
+├── multi-agents                # Multi-Agents 모델 (추후 개발 예정)
 │   └── README.md               # 설명 - 다양한 설명 (Repository overview)
 ├── LICENSE                     # 라이선스 정책
-└── README.md                   # 설명 - 다양한 설명 (Repository overview)
+└── README.md                   # 설명 - 전체 서비스 구조 설명 (Repository overview)
 ```
 
 **Web & REST API & Ajax 아키텍처**

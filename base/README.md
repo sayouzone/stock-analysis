@@ -5,7 +5,7 @@
 LLM(Large Language Model)으로 뉴스 기사, 댓글 등을 요약하거나 분석합니다. 
 추출된 데이터는 Big Lake(BigQuery)에 저장되어 나중에 분석 및 조회를 위해 사용됩니다.
 
-![기본 구조](https://www.sayouzone.com/resource/images/blog/stock_analysis_basis.png)
+폴더 구성은 아래와 같습니다.
 
 ```tree
 ├── frontend                # 프론트엔드
@@ -23,6 +23,8 @@ LLM(Large Language Model)으로 뉴스 기사, 댓글 등을 요약하거나 분
 ├── requirements.txt
 └── README.md               # 설명 - 다양한 설명 (Repository overview)
 ```
+
+![기본 구조](https://www.sayouzone.com/resource/images/blog/stock_analysis_basis.png)
 
 ## 설정
 
