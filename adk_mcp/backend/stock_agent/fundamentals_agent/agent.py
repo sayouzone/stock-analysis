@@ -38,6 +38,7 @@ CURRENT_DATE = date.today().isoformat()
 CURRENT_DATE_LINE_KO = f"오늘 날짜는 {CURRENT_DATE}입니다."
 CURRENT_DATE_LINE_EN = f"Today's date is {CURRENT_DATE}."
 
+# Modified by SJKIM
 #fundamentals_fetcher_instruction = f"{CURRENT_DATE_LINE_KO}\n\n{fetch_fundamentals_prompt()}"
 fundamentals_fetcher_instruction = f"{CURRENT_DATE_LINE_KO}\n\n{fetch_fundamentals_prompt_from_string()}"
 
@@ -190,16 +191,16 @@ class Fundamentals(BaseModel):
 
 class FundamentalsData(Fundamentals):
     # 재무제표 3종만 포함하는 기본 데이터 모델
-    ticker: str = Field(description="The stock ticker symbol of the company.")
-    country: str = Field(description="The country where the company is listed.")
+    #ticker: str = Field(description="The stock ticker symbol of the company.")
+    #country: str = Field(description="The country where the company is listed.")
     balance_sheet: Optional[str] = Field(default=None, description="The company's balance sheet data (재무상태표).")
     income_statement: Optional[str] = Field(default=None, description="The company's income statement data (손익계산서).")
     cash_flow: Optional[str] = Field(default=None, description="The company's cash flow statement data (현금흐름표).")
     
 class AnalysisResult(Fundamentals):
     # 재무제표 3종에 대한 분석 결과 모델
-    ticker: str = Field(description="The stock ticker symbol of the company.")
-    country: str = Field(description="The country where the company is listed.")
+    #ticker: str = Field(description="The stock ticker symbol of the company.")
+    #country: str = Field(description="The country where the company is listed.")
     balance_sheet: str = Field(description="재무상태표 분석 - 자산, 부채, 자본 구조 및 건전성 평가")
     income_statement: str = Field(description="손익계산서 분석 - 매출, 비용, 영업이익, 순이익 추이 분석")
     cash_flow: str = Field(description="현금흐름표 분석 - 영업/투자/재무 활동 현금흐름 분석")
