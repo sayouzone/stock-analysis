@@ -1,0 +1,25 @@
+{
+    "download_filings": {
+        "start_year": 2023,
+        "end_year": 2023,
+        "quarters": [
+            1,
+            2,
+            3,
+            4
+        ],
+        "filing_types": [
+            "10-K",
+            "10-Q",
+            "8-K"
+        ],
+        "cik_tickers": [
+            "AAPL"
+        ],
+        "user_agent": "Chanwoo Kim (cksdn2034@sayouzone.com)",
+        "raw_filings_folder": "RAW_FILINGS",
+        "indices_folder": "INDICES",
+        "filings_metadata_file": "FILINGS_METADATA.csv",
+        "skip_present_indices": true
+    }
+}
