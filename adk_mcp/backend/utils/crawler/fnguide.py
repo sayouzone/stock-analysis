@@ -17,13 +17,16 @@ FnGuide 웹사이트에서 기업 재무 정보를 크롤링하여 GCS에 저장
 """
 
 import requests
-from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+
+# playwright 임포트는 사용자 요청에 따라 유지 (현재 미사용)
+from playwright.async_api import (  # noqa: F401
+    async_playwright,  # noqa: F401
+    TimeoutError as PlaywrightTimeoutError,  # noqa: F401
+)
 import pandas as pd
 from datetime import date
 from io import StringIO
 import json
-import os
-import asyncio
 import sys
 from pathlib import Path
 from bs4 import BeautifulSoup
@@ -69,7 +72,9 @@ class FnGuideCrawler:
             bucket_name: GCS 버킷 이름
         """
         self.stock = stock
-        self.static_url = f"https://comp.fnguide.com/SVO2/ASP/SVD_main.asp?pGB=1&gicode=A{stock}"
+        self.static_url = (
+            f"https://comp.fnguide.com/SVO2/ASP/SVD_main.asp?pGB=1&gicode=A{stock}"
+        )
         self.dynamic_url = f"https://comp.fnguide.com/SVO2/ASP/SVD_Finance.asp?pGB=1&gicode=A{stock}&cID=&MenuYn=Y&ReportGB=&NewMenuID=103&stkGb=701"
         self._translator = _FnGuideTranslator()
 
@@ -144,7 +149,7 @@ class FnGuideCrawler:
 
         return self._gcs
 
-    async def get_all_fundamentals(
+    def get_all_fundamentals(
         self,
         stock: str | None = None,
         *,
@@ -170,7 +175,9 @@ class FnGuideCrawler:
         """
         if stock:
             self.stock = stock
-            self.static_url = f"https://comp.fnguide.com/SVO2/ASP/SVD_main.asp?pGB=1&gicode=A{stock}"
+            self.static_url = (
+                f"https://comp.fnguide.com/SVO2/ASP/SVD_main.asp?pGB=1&gicode=A{stock}"
+            )
             self.dynamic_url = f"https://comp.fnguide.com/SVO2/ASP/SVD_Finance.asp?pGB=1&gicode=A{stock}&cID=&MenuYn=Y&ReportGB=&NewMenuID=103&stkGb=701"
 
         # GCS 폴더 구조 설정 (파티션 기반: year=YYYY/quarter=Q/)
@@ -178,10 +185,7 @@ class FnGuideCrawler:
         quarter = (today.month - 1) // 3 + 1  # 1~3월=1, 4~6월=2, 7~9월=3, 10~12월=4
         year_partition = f"year={today.year}"
         quarter_partition = f"{QUARTER_PREFIX}{quarter}"
-        folder_name = (
-            f"Fundamentals/FnGuide/{year_partition}/"
-            f"{quarter_partition}/"
-        )
+        folder_name = f"Fundamentals/FnGuide/{year_partition}/{quarter_partition}/"
         file_base = self.stock
 
         # 레거시 호환성을 위한 폴더 경로 설정
@@ -211,7 +215,9 @@ class FnGuideCrawler:
             if cached_data is not None and not overwrite:
                 return self._convert_to_new_schema(cached_data)
         elif use_cache and self.gcs is None:
-            print("⚠ GCS를 사용할 수 없어 캐시를 사용할 수 없습니다. 새로 크롤링합니다.")
+            print(
+                "⚠ GCS를 사용할 수 없어 캐시를 사용할 수 없습니다. 새로 크롤링합니다."
+            )
 
         # overwrite=False이고 아직 파일 목록을 가져오지 않았다면 수집
         if existing_files is None and not overwrite and self.gcs is not None:
@@ -228,8 +234,8 @@ class FnGuideCrawler:
         static_data = self._get_static_tables()
         raw_data.update(static_data)
 
-        # 2. 동적 테이블 수집 (Playwright로 재무제표 3종)
-        dynamic_data = await self._get_dynamic_tables()
+        # 2. 동적 테이블 수집 (requests + bs4로 재무제표 3종)
+        dynamic_data = self._get_dynamic_tables()
         raw_data.update(dynamic_data)
 
         # 3. GCS 업로드용 CSV 페이로드 생성
@@ -265,7 +271,7 @@ class FnGuideCrawler:
             "country": "KR",
             "balance_sheet": None,
             "income_statement": None,
-            "cash_flow": None
+            "cash_flow": None,
         }
 
         # 디버깅: 수집된 동적 데이터 키 확인
@@ -279,28 +285,29 @@ class FnGuideCrawler:
         # 재무상태표 (포괄손익계산서 → income_statement)
         if "포괄손익계산서" in dynamic_data and dynamic_data["포괄손익계산서"]:
             result["income_statement"] = json.dumps(
-                dynamic_data["포괄손익계산서"],
-                ensure_ascii=False
+                dynamic_data["포괄손익계산서"], ensure_ascii=False
             )
-            print(f"[DEBUG] income_statement 변환 완료: {len(result['income_statement'])} bytes")
+            print(
+                f"[DEBUG] income_statement 변환 완료: {len(result['income_statement'])} bytes"
+            )
         else:
             print(f"[DEBUG] 포괄손익계산서 데이터 없음")
 
         # 재무상태표
         if "재무상태표" in dynamic_data and dynamic_data["재무상태표"]:
             result["balance_sheet"] = json.dumps(
-                dynamic_data["재무상태표"],
-                ensure_ascii=False
+                dynamic_data["재무상태표"], ensure_ascii=False
             )
-            print(f"[DEBUG] balance_sheet 변환 완료: {len(result['balance_sheet'])} bytes")
+            print(
+                f"[DEBUG] balance_sheet 변환 완료: {len(result['balance_sheet'])} bytes"
+            )
         else:
             print(f"[DEBUG] 재무상태표 데이터 없음")
 
         # 현금흐름표
         if "현금흐름표" in dynamic_data and dynamic_data["현금흐름표"]:
             result["cash_flow"] = json.dumps(
-                dynamic_data["현금흐름표"],
-                ensure_ascii=False
+                dynamic_data["현금흐름표"], ensure_ascii=False
             )
             print(f"[DEBUG] cash_flow 변환 완료: {len(result['cash_flow'])} bytes")
         else:
@@ -308,7 +315,9 @@ class FnGuideCrawler:
 
         return result
 
-    def _convert_to_new_schema(self, cached_data: dict[str, list[dict]]) -> dict[str, str | None]:
+    def _convert_to_new_schema(
+        self, cached_data: dict[str, list[dict]]
+    ) -> dict[str, str | None]:
         """
         GCS에서 로드한 구 스키마 데이터를 새 스키마로 변환
 
@@ -323,33 +332,30 @@ class FnGuideCrawler:
             "country": "KR",
             "balance_sheet": None,
             "income_statement": None,
-            "cash_flow": None
+            "cash_flow": None,
         }
 
         # 포괄손익계산서 → income_statement
         if "포괄손익계산서" in cached_data and cached_data["포괄손익계산서"]:
             result["income_statement"] = json.dumps(
-                cached_data["포괄손익계산서"],
-                ensure_ascii=False
+                cached_data["포괄손익계산서"], ensure_ascii=False
             )
 
         # 재무상태표 → balance_sheet
         if "재무상태표" in cached_data and cached_data["재무상태표"]:
             result["balance_sheet"] = json.dumps(
-                cached_data["재무상태표"],
-                ensure_ascii=False
+                cached_data["재무상태표"], ensure_ascii=False
             )
 
         # 현금흐름표 → cash_flow
         if "현금흐름표" in cached_data and cached_data["현금흐름표"]:
             result["cash_flow"] = json.dumps(
-                cached_data["현금흐름표"],
-                ensure_ascii=False
+                cached_data["현금흐름표"], ensure_ascii=False
             )
 
         return result
 
-    async def fundamentals(
+    def fundamentals(
         self,
         stock: str | None = None,
         *,
@@ -376,7 +382,7 @@ class FnGuideCrawler:
                 "cash_flow": str | None           # JSON 문자열
             }
         """
-        return await self.get_all_fundamentals(
+        return self.get_all_fundamentals(
             stock=stock,
             use_cache=use_cache,
             overwrite=overwrite,
@@ -407,226 +413,198 @@ class FnGuideCrawler:
                 )
                 datasets[name] = frame.to_dict(orient="records")
             else:
-                print(f"경고: '{name}'에 해당하는 테이블(index {index})을 찾지 못해 빈 데이터로 저장합니다.")
+                print(
+                    f"경고: '{name}'에 해당하는 테이블(index {index})을 찾지 못해 빈 데이터로 저장합니다."
+                )
                 datasets[name] = []
 
         return datasets
 
-    async def _get_dynamic_tables(self) -> dict[str, list[dict]]:
+    def _get_dynamic_tables(self) -> dict[str, list[dict]]:
         """
-        동적 테이블 수집 (Async Playwright 사용)
+        동적 테이블 수집 (requests + BeautifulSoup 사용)
 
-        JavaScript로 렌더링되는 재무제표 3종(포괄손익계산서, 재무상태표, 현금흐름표)을
-        Playwright로 크롤링하여 멀티인덱스 DataFrame으로 구조화
+        재무제표 3종(포괄손익계산서, 재무상태표, 현금흐름표)을
+        requests와 BeautifulSoup으로 크롤링하여 멀티인덱스 DataFrame으로 구조화
 
         Returns:
             dict[str, list[dict]]: 테이블명을 키로 하는 레코드 딕셔너리
         """
         result_dict = {}
 
-        # 환경 변수로 headless 모드 제어 (기본값: True)
-        # FNGUIDE_HEADLESS=false 설정 시 브라우저 창 표시
-        headless = os.getenv("FNGUIDE_HEADLESS", "true").lower() != "false"
+        # requests로 페이지 가져오기
+        print(f"페이지 요청 중: {self.dynamic_url}")
+        response = requests.get(self.dynamic_url)
+        response.raise_for_status()
 
-        async with async_playwright() as p:
-            # 타임아웃 설정 증가 및 브라우저 최적화
-            browser = await p.chromium.launch(
-                headless=headless,
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--disable-dev-shm-usage',
-                    '--no-sandbox',
-                ]
-            )
-            page = await browser.new_page()
-            # 타임아웃을 60초로 증가 (기본값: 30초)
-            page.set_default_timeout(60000)
-            await page.goto(self.dynamic_url, wait_until="networkidle", timeout=60000)
+        # BeautifulSoup으로 파싱
+        soup = BeautifulSoup(response.text, "html.parser")
 
-            # 접힌 테이블을 모두 펼치기 위해 아코디언 버튼 자동 클릭
-            button_selector = ".btn_acdopen"
+        # 모든 테이블 데이터 수집
+        for title in self.DYNAMIC_TABLE_TITLES:
+            try:
+                print(f"\n{title} 데이터 수집 중...")
 
-            while True:
-                try:
-                    # 화면에 보이는 버튼 찾기
-                    buttons = await page.locator(f"{button_selector}:visible").all()
-                    if len(buttons) == 0:  # 더 이상 클릭할 버튼이 없으면 종료
+                # 해당 타이틀을 포함하는 테이블 찾기
+                tables = soup.find_all("table")
+                target_table = None
+                for table in tables:
+                    if title in table.get_text():
+                        target_table = table
                         break
 
-                    button = buttons[0]
-                    try:
-                        # 버튼이 클릭 가능한 상태가 될 때까지 대기
-                        await button.wait_for(state="visible", timeout=2000)
-                        await button.scroll_into_view_if_needed()
-                        await button.click(timeout=2000, force=False)
-                        await page.wait_for_timeout(500)  # DOM 업데이트 대기
+                if not target_table:
+                    print(f"  - ⚠️ {title} 테이블을 찾을 수 없음")
+                    result_dict[title] = []
+                    continue
 
-                    except PlaywrightTimeoutError:
-                        # 일반 클릭 실패 시 강제 클릭 시도
-                        try:
-                            await button.click(force=True)
-                            await page.wait_for_timeout(500)
-                        except:
-                            print(f"버튼 클릭 실패, 다음으로 진행")
-                            await page.wait_for_timeout(500)
+                # 1. thead에서 날짜/기간 데이터 추출 (DataFrame의 index가 됨)
+                thead = target_table.find("thead")
+                if not thead:
+                    print(f"  - ⚠️ thead를 찾을 수 없음")
+                    result_dict[title] = []
+                    continue
+
+                # thead 내부의 각 행(tr)을 순회하면서 첫 번째 th(행 레이블)를 제외한 값을 수집한다.
+                thead_rows = thead.find_all("tr")
+                index_rows: list[list[str]] = []
+                for tr in thead_rows:
+                    row_headers = []
+                    ths = tr.find_all("th", recursive=False)
+                    for col_idx, th in enumerate(ths):
+                        text = th.get_text(strip=True)
+                        if not text:
                             continue
 
-                except Exception as e:
-                    print(e)
-                    break
+                        # 대부분의 표에서 첫 번째 th는 행 구분(예: IFRS(연결))이므로 스킵한다.
+                        if col_idx == 0 and len(ths) > 1:
+                            continue
 
-            # 모든 테이블 데이터 수집
-            for title in self.DYNAMIC_TABLE_TITLES:
-                try:
-                    print(f"\n{title} 데이터 수집 중...")
-                    table_locator = page.locator("table:visible").filter(has_text=title)
+                        colspan_attr = th.get("colspan")
+                        try:
+                            colspan = int(colspan_attr) if colspan_attr else 1
+                        except ValueError:
+                            colspan = 1
 
-                    # 1. thead에서 날짜/기간 데이터 추출 (DataFrame의 index가 됨)
-                    # thead의 HTML을 가져와서 파싱
-                    thead_html = await table_locator.locator("thead:visible").inner_html()
-                    thead_soup = BeautifulSoup(thead_html, 'html.parser')
+                        row_headers.extend([text] * colspan)
 
-                    # thead 내부의 각 행(tr)을 순회하면서 첫 번째 th(행 레이블)를 제외한 값을 수집한다.
-                    thead_rows = thead_soup.find_all('tr')
-                    index_rows: list[list[str]] = []
-                    for tr in thead_rows:
-                        row_headers = []
-                        ths = tr.find_all('th', recursive=False)
-                        for col_idx, th in enumerate(ths):
-                            text = th.get_text(strip=True)
-                            if not text:
+                    if row_headers:
+                        index_rows.append(row_headers)
+
+                index_list = max(index_rows, key=len) if index_rows else []
+
+                total_headers = sum(len(tr.find_all("th")) for tr in thead_rows)
+                print(
+                    f"  - 기간 데이터 (헤더 {total_headers}개 중 데이터 {len(index_list)}개): {index_list}"
+                )
+
+                # 2. tbody에서 항목별 데이터 수집
+                data_dict = {}  # {컬럼명_튜플: [값들]}
+                print(f"  - tbody 데이터 추출 중...")
+
+                tbody = target_table.find("tbody")
+                if not tbody:
+                    print(f"  - ⚠️ tbody를 찾을 수 없음")
+                    data_dict = {}
+                else:
+                    tbody_trs = tbody.find_all("tr", recursive=False)
+                    print(f"  - 발견된 행 수: {len(tbody_trs)}")
+
+                    # 디버깅: 첫 번째 행의 HTML 구조 확인
+                    if tbody_trs:
+                        print(f"  - [DEBUG] 첫 행 HTML: {str(tbody_trs[0])[:500]}")
+
+                    # 마지막으로 나온 span 텍스트를 저장 (상위 카테고리 추적용)
+                    last_span_text = None
+                    processed_count = 0
+
+                    for idx, tr in enumerate(tbody_trs):
+                        if idx % 20 == 0:  # 20개마다 진행상황 출력
+                            print(f"  - 처리 중: {idx}/{len(tbody_trs)} 행")
+
+                        try:
+                            # th 직접 찾기 (div 없이)
+                            th = tr.find("th")
+                            if not th:
+                                if idx < 3:
+                                    print(
+                                        f"  - [DEBUG] 행 {idx}: th 없음, HTML: {str(tr)[:200]}"
+                                    )
                                 continue
 
-                            # 대부분의 표에서 첫 번째 th는 행 구분(예: IFRS(연결))이므로 스킵한다.
-                            if col_idx == 0 and len(ths) > 1:
-                                continue
+                            span = th.find("span")
+                            column_name_tuple = None
 
-                            colspan_attr = th.get('colspan')
-                            try:
-                                colspan = int(colspan_attr) if colspan_attr else 1
-                            except ValueError:
-                                colspan = 1
+                            # 1. span이 존재하는 경우: 새로운 상위 카테고리 시작
+                            if span:
+                                span_text = span.get_text(strip=True)
+                                th_text = th.get_text(strip=True)
+                                last_span_text = span_text
+                                column_name_tuple = (span_text, th_text)
+                                if idx < 3:
+                                    print(
+                                        f"  - [DEBUG] 행 {idx} (span): {column_name_tuple}"
+                                    )
+                            # 2. span은 없지만 th가 존재하는 경우
+                            else:
+                                th_text = th.get_text(strip=True)
+                                if last_span_text:
+                                    column_name_tuple = (last_span_text, th_text)
+                                else:
+                                    column_name_tuple = (th_text, "")
+                                if idx < 3:
+                                    print(
+                                        f"  - [DEBUG] 행 {idx} (no span): {column_name_tuple}"
+                                    )
 
-                            row_headers.extend([text] * colspan)
+                            # td 값들 추출 (각 기간별 데이터)
+                            tds = tr.find_all("td", recursive=False)
+                            values = [td.get_text(strip=True) for td in tds]
 
-                        if row_headers:
-                            index_rows.append(row_headers)
+                            if idx < 3:
+                                print(
+                                    f"  - [DEBUG] 행 {idx} td 개수: {len(tds)}, 값: {values[:3] if values else '없음'}"
+                                )
 
-                    index_list = max(index_rows, key=len) if index_rows else []
-
-                    total_headers = sum(len(tr.find_all('th')) for tr in thead_rows)
-                    print(f"  - 기간 데이터 (헤더 {total_headers}개 중 데이터 {len(index_list)}개): {index_list}")
-
-                    # 2. tbody에서 항목별 데이터 수집 (HTML 한 번에 가져와서 파싱)
-                    data_dict = {}  # {컬럼명_튜플: [값들]}
-                    print(f"  - tbody 데이터 추출 중...")
-
-                    try:
-                        # 테이블 전체 HTML을 한 번에 가져오기
-                        table_html = await table_locator.inner_html()
-
-                        # BeautifulSoup으로 파싱
-                        soup = BeautifulSoup(table_html, 'html.parser')
-                        tbody = soup.find('tbody')
-
-                        if not tbody:
-                            print(f"  - ⚠️ tbody를 찾을 수 없음")
-                            data_dict = {}
-                        else:
-                            tbody_trs = tbody.find_all('tr', recursive=False)
-                            print(f"  - 발견된 행 수: {len(tbody_trs)}")
-
-                            # 디버깅: 첫 번째 행의 HTML 구조 확인
-                            if tbody_trs:
-                                print(f"  - [DEBUG] 첫 행 HTML: {str(tbody_trs[0])[:500]}")
-
-                            # 마지막으로 나온 span 텍스트를 저장 (상위 카테고리 추적용)
-                            last_span_text = None
-                            processed_count = 0
-
-                            for idx, tr in enumerate(tbody_trs):
-                                if idx % 20 == 0:  # 20개마다 진행상황 출력
-                                    print(f"  - 처리 중: {idx}/{len(tbody_trs)} 행")
-
-                                try:
-                                    # th 직접 찾기 (div 없이)
-                                    th = tr.find('th')
-                                    if not th:
-                                        if idx < 3:
-                                            print(f"  - [DEBUG] 행 {idx}: th 없음, HTML: {str(tr)[:200]}")
-                                        continue
-
-                                    span = th.find('span')
-                                    column_name_tuple = None
-
-                                    # 1. span이 존재하는 경우: 새로운 상위 카테고리 시작
-                                    if span:
-                                        span_text = span.get_text(strip=True)
-                                        th_text = th.get_text(strip=True)
-                                        last_span_text = span_text
-                                        column_name_tuple = (span_text, th_text)
-                                        if idx < 3:
-                                            print(f"  - [DEBUG] 행 {idx} (span): {column_name_tuple}")
-                                    # 2. span은 없지만 th가 존재하는 경우
-                                    else:
-                                        th_text = th.get_text(strip=True)
-                                        if last_span_text:
-                                            column_name_tuple = (last_span_text, th_text)
-                                        else:
-                                            column_name_tuple = (th_text, "")
-                                        if idx < 3:
-                                            print(f"  - [DEBUG] 행 {idx} (no span): {column_name_tuple}")
-
-                                    # td 값들 추출 (각 기간별 데이터)
-                                    tds = tr.find_all('td', recursive=False)
-                                    values = [td.get_text(strip=True) for td in tds]
-
+                            # 데이터 딕셔너리에 추가 (값이 있는 경우만)
+                            if column_name_tuple and values:
+                                # 헤더 개수와 값 개수가 일치하는지 확인
+                                if len(values) == len(index_list):
+                                    data_dict[column_name_tuple] = values
+                                    processed_count += 1
                                     if idx < 3:
-                                        print(f"  - [DEBUG] 행 {idx} td 개수: {len(tds)}, 값: {values[:3] if values else '없음'}")
-
-                                    # 데이터 딕셔너리에 추가 (값이 있는 경우만)
-                                    if column_name_tuple and values:
-                                        # 헤더 개수와 값 개수가 일치하는지 확인
-                                        if len(values) == len(index_list):
-                                            data_dict[column_name_tuple] = values
-                                            processed_count += 1
-                                            if idx < 3:
-                                                print(f"  - [DEBUG] 행 {idx} 성공!")
-                                        else:
-                                            # 길이가 다른 경우 디버깅 정보 출력
-                                            if idx < 5:  # 처음 5개만 출력
-                                                print(f"  - ⚠️ 행 {idx} 길이 불일치: 헤더={len(index_list)}, 값={len(values)} (스킵)")
-
-                                except Exception as e:
+                                        print(f"  - [DEBUG] 행 {idx} 성공!")
+                                else:
+                                    # 길이가 다른 경우 디버깅 정보 출력
                                     if idx < 5:  # 처음 5개만 출력
-                                        print(f"  - 행 {idx} 처리 중 에러: {e}")
-                                    continue
+                                        print(
+                                            f"  - ⚠️ 행 {idx} 길이 불일치: 헤더={len(index_list)}, 값={len(values)} (스킵)"
+                                        )
 
-                            print(f"  - 처리 완료: {processed_count}/{len(tbody_trs)} 행")
+                        except Exception as e:
+                            if idx < 5:  # 처음 5개만 출력
+                                print(f"  - 행 {idx} 처리 중 에러: {e}")
+                            continue
 
-                    except Exception as e:
-                        print(f"  - ⚠️ tbody 데이터 수집 실패: {e}")
-                        data_dict = {}
+                    print(f"  - 처리 완료: {processed_count}/{len(tbody_trs)} 행")
 
-                    # 3. DataFrame 생성
-                    if data_dict and index_list:
-                        df = pd.DataFrame(data_dict, index=index_list)
+                # 3. DataFrame 생성
+                if data_dict and index_list:
+                    df = pd.DataFrame(data_dict, index=index_list)
 
-                        # 4. 멀티인덱스로 columns 변환
-                        #    예: ("유동자산", "현금및현금성자산"), ("유동자산", "단기투자자산") ...
-                        df.columns = pd.MultiIndex.from_tuples(df.columns)
+                    # 4. 멀티인덱스로 columns 변환
+                    #    예: ("유동자산", "현금및현금성자산"), ("유동자산", "단기투자자산") ...
+                    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-                        result_dict[title] = self._dataframe_to_records(df)
-                        print(f"  - 완료! DataFrame shape: {df.shape}")
-                    else:
-                        print(f"  - 데이터 없음")
-                        result_dict[title] = []
-
-                except Exception as e:
-                    print(f"{title} 수집 실패: {e}")
+                    result_dict[title] = self._dataframe_to_records(df)
+                    print(f"  - 완료! DataFrame shape: {df.shape}")
+                else:
+                    print(f"  - 데이터 없음")
                     result_dict[title] = []
 
-            await browser.close()
+            except Exception as e:
+                print(f"{title} 수집 실패: {e}")
+                result_dict[title] = []
 
         return result_dict
 
@@ -662,7 +640,9 @@ class FnGuideCrawler:
         cached_data: dict[str, list[dict]] = {}
 
         # 정적 + 동적 테이블 모두 확인
-        all_table_names = [name for name, _ in self.STATIC_TABLE_MAP] + self.DYNAMIC_TABLE_TITLES
+        all_table_names = [
+            name for name, _ in self.STATIC_TABLE_MAP
+        ] + self.DYNAMIC_TABLE_TITLES
 
         for name in all_table_names:
             new_blob = f"{folder_name}{file_base}_{name}.csv"
@@ -938,7 +918,9 @@ class FnGuideCrawler:
             return None
 
         year_value = str(year if year is not None else year_part.split("=", 1)[1])
-        quarter_value = str(quarter if quarter is not None else quarter_part.split("=", 1)[1])
+        quarter_value = str(
+            quarter if quarter is not None else quarter_part.split("=", 1)[1]
+        )
         legacy_quarter = f"{year_value}-Q{quarter_value}"
 
         return f"/Fundamentals/FnGuide/{stock}/{legacy_quarter}/raw/"
@@ -1022,12 +1004,14 @@ class _FnGuideTranslator:
         if stock_code:
             try:
                 from utils.companydict import companydict
+
                 company_name = companydict.get_company_by_code(stock_code)
                 if company_name:
                     company_name = self._normalize(company_name)
             except (ImportError, ModuleNotFoundError):
                 try:
                     from ..companydict import companydict
+
                     company_name = companydict.get_company_by_code(stock_code)
                     if company_name:
                         company_name = self._normalize(company_name)
@@ -1042,7 +1026,9 @@ class _FnGuideTranslator:
             for column in translated.columns:
                 # 각 레벨별로 번역
                 new_columns.append(
-                    tuple(self._translate_token(level, company_name) for level in column)
+                    tuple(
+                        self._translate_token(level, company_name) for level in column
+                    )
                 )
             translated.columns = pd.MultiIndex.from_tuples(
                 new_columns, names=translated.columns.names
@@ -1095,9 +1081,10 @@ class _FnGuideTranslator:
 
 # ==================== 하위 호환성 함수 ====================
 
-async def get_fnguide_fundamentals(company: str) -> dict[str, str | None]:
+
+def get_fnguide_fundamentals(company: str) -> dict[str, str | None]:
     """
-    하위 호환성을 위한 래퍼 함수 (Async)
+    하위 호환성을 위한 래퍼 함수
 
     기존 코드에서 이 함수를 사용하는 경우를 위해 유지
 
@@ -1114,12 +1101,12 @@ async def get_fnguide_fundamentals(company: str) -> dict[str, str | None]:
         }
 
     Example:
-        >>> data = await get_fnguide_fundamentals("005930")
+        >>> data = get_fnguide_fundamentals("005930")
         >>> print(data.keys())
         dict_keys(['ticker', 'country', 'balance_sheet', 'income_statement', 'cash_flow'])
     """
     crawler = FnGuideCrawler(stock=company)
-    return await crawler.get_all_fundamentals()
+    return crawler.get_all_fundamentals()
 
 
 if __name__ == "__main__":
@@ -1131,15 +1118,16 @@ if __name__ == "__main__":
     print("캐시: 사용 안 함 (새로 크롤링)")
     print()
 
-    async def test():
+    def test():
         import time
+
         start = time.time()
 
         print("[1/3] 크롤러 초기화...")
         crawler = FnGuideCrawler(stock="005930")
 
         print("[2/3] 재무제표 수집 시작... (최대 60초 소요)")
-        result = await crawler.get_all_fundamentals(use_cache=False)
+        result = crawler.get_all_fundamentals(use_cache=False)
 
         elapsed = time.time() - start
         print(f"[3/3] 수집 완료! (소요 시간: {elapsed:.1f}초)")
@@ -1150,7 +1138,7 @@ if __name__ == "__main__":
         print(f"ticker: {result.get('ticker')}")
         print(f"country: {result.get('country')}")
 
-        for key in ['balance_sheet', 'income_statement', 'cash_flow']:
+        for key in ["balance_sheet", "income_statement", "cash_flow"]:
             value = result.get(key)
             if value:
                 print(f"{key}: {len(value):,} bytes")
@@ -1160,7 +1148,7 @@ if __name__ == "__main__":
         return result
 
     try:
-        asyncio.run(test())
+        test()
         print("\n" + "=" * 80)
         print("✅ 테스트 성공!")
         print("=" * 80)
@@ -1172,4 +1160,5 @@ if __name__ == "__main__":
         print("=" * 80)
         print(f"에러: {e}")
         import traceback
+
         traceback.print_exc()
